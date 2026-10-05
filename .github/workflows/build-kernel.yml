@@ -2,18 +2,15 @@ name: Build Kernel
 
 on:
   workflow_dispatch:
-    # GitHub allows at most 10 workflow_dispatch inputs, so these are the knobs
-    # worth changing per-run. Everything else lives in the config file selected
-    # by `config`, so a fork can keep one profile per device.
+    # GitHub allows at most 10 workflow_dispatch inputs.
+    # "config" means: use the value specified in the selected config file.
     inputs:
       config:
         description: "Config file to build (path, relative to the repo root)"
         required: false
-        default: "config.env"
+        default: "config/reno7se-mt6877.env"
         type: string
-      # "config" on the options below means "use whatever the config file says".
-      # It is the default so that running the form without touching anything
-      # reproduces exactly what your profile describes.
+
       ksu_variant:
         description: "KernelSU variant"
         required: false
@@ -28,46 +25,73 @@ on:
           - resukisu
           - rsuntk
           - backslashxx
+
       ksu_ref:
-        description: "KernelSU branch/tag/commit (blank = best default for your kernel)"
+        description: "KernelSU branch/tag/commit (blank = use config/default)"
         required: false
         default: ""
         type: string
+
       hook_mode:
         description: "Syscall hook mechanism"
         required: false
         default: "config"
         type: choice
-        options: [config, auto, kprobes, manual, tracepoint, syscall, none]
+        options:
+          - config
+          - auto
+          - kprobes
+          - manual
+          - tracepoint
+          - syscall
+          - none
+
       susfs:
-        description: "Apply SUSFS (mount/root hiding)"
+        description: "Apply SUSFS"
         required: false
         default: "config"
         type: choice
-        options: [config, "true", "false"]
+        options:
+          - config
+          - "true"
+          - "false"
+
       path_umount:
-        description: "Backport path_umount() (needed on kernels older than 5.9)"
+        description: "Backport path_umount()"
         required: false
         default: "config"
         type: choice
-        options: [config, "true", "false"]
+        options:
+          - config
+          - "true"
+          - "false"
+
       hide_stuff:
-        description: "Apply hide_stuff (extra fingerprint removal)"
+        description: "Apply hide_stuff"
         required: false
         default: "config"
         type: choice
-        options: [config, "true", "false"]
+        options:
+          - config
+          - "true"
+          - "false"
+
       kpm:
-        description: "Enable KPM (SukiSU-Ultra only)"
+        description: "Enable KPM"
         required: false
         default: "config"
         type: choice
-        options: [config, "true", "false"]
+        options:
+          - config
+          - "true"
+          - "false"
+
       extra_defconfig:
-        description: "Extra defconfig lines, space separated (e.g. CONFIG_TMPFS_XATTR=y)"
+        description: "Extra defconfig lines"
         required: false
         default: ""
         type: string
+
       publish_release:
         description: "Publish the build as a GitHub Release"
         required: false
@@ -76,30 +100,74 @@ on:
 
   workflow_call:
     inputs:
-      config:          { required: false, default: "config.env", type: string }
-      ksu_variant:     { required: false, default: "config",     type: string }
-      ksu_ref:         { required: false, default: "",           type: string }
-      hook_mode:       { required: false, default: "config",     type: string }
-      susfs:           { required: false, default: "config",     type: string }
-      path_umount:     { required: false, default: "config",     type: string }
-      hide_stuff:      { required: false, default: "config",     type: string }
-      kpm:             { required: false, default: "config",     type: string }
-      extra_defconfig: { required: false, default: "",           type: string }
-      publish_release: { required: false, default: false,        type: boolean }
+      config:
+        required: false
+        default: "config/reno7se-mt6877.env"
+        type: string
 
-# Only one build per ref at a time; a newer run supersedes an older one.
+      ksu_variant:
+        required: false
+        default: "config"
+        type: string
+
+      ksu_ref:
+        required: false
+        default: ""
+        type: string
+
+      hook_mode:
+        required: false
+        default: "config"
+        type: string
+
+      susfs:
+        required: false
+        default: "config"
+        type: string
+
+      path_umount:
+        required: false
+        default: "config"
+        type: string
+
+      hide_stuff:
+        required: false
+        default: "config"
+        type: string
+
+      kpm:
+        required: false
+        default: "config"
+        type: string
+
+      extra_defconfig:
+        required: false
+        default: ""
+        type: string
+
+      publish_release:
+        required: false
+        default: false
+        type: boolean
+
+
+# Prevent duplicate builds of the same ref/config.
 concurrency:
   group: build-kernel-${{ github.ref }}-${{ inputs.config }}
   cancel-in-progress: true
 
+
 permissions:
   contents: read
+
 
 jobs:
   build:
     name: Build ${{ inputs.config }}
+
     runs-on: ubuntu-latest
     timeout-minutes: 120
+
     outputs:
       device: ${{ steps.meta.outputs.device }}
       build_time: ${{ steps.meta.outputs.build_time }}
@@ -107,14 +175,23 @@ jobs:
       ksu_version: ${{ steps.meta.outputs.ksu_version }}
       kernel_release: ${{ steps.meta.outputs.kernel_release }}
       susfs_version: ${{ steps.meta.outputs.susfs_version }}
+
     env:
+      # KernelSU_Action working directory.
       WORKSPACE: ${{ github.workspace }}/kernel_workspace
+
+      # Selected device configuration.
       CONFIG_ENV: ${{ inputs.config }}
+
+      # ccache
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
 
-      # workflow inputs -> IN_* overrides consumed by scripts/config.sh
+      # ----------------------------------------------------------
+      # workflow_dispatch / workflow_call input overrides
+      # ----------------------------------------------------------
+
       IN_KSU_VARIANT: ${{ inputs.ksu_variant }}
       IN_KSU_REF: ${{ inputs.ksu_ref }}
       IN_KSU_HOOK_MODE: ${{ inputs.hook_mode }}
@@ -124,15 +201,31 @@ jobs:
       IN_ENABLE_KPM: ${{ inputs.kpm }}
       IN_EXTRA_DEFCONFIG: ${{ inputs.extra_defconfig }}
 
+
     steps:
-      - uses: actions/checkout@v4
+      # ==========================================================
+      # Checkout KernelSU_Action itself
+      # ==========================================================
+
+      - name: Checkout KernelSU Action
+        uses: actions/checkout@v4
+
+
+      # ==========================================================
+      # Resolve device/build configuration
+      # ==========================================================
 
       - name: Resolve configuration
         run: bash scripts/config.sh
 
+
+      # ==========================================================
+      # Free runner disk space
+      # ==========================================================
+
       - name: Free up disk space
         if: env.REMOVE_UNUSED_PACKAGES == 'true'
-        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
         with:
           tool-cache: true
           android: false
@@ -142,41 +235,294 @@ jobs:
           docker-images: true
           swap-storage: false
 
+
+      # ==========================================================
+      # Add swap
+      # ==========================================================
+
       - name: Add swap space
+        shell: bash
         run: |
-          # LTO links are memory-hungry and the runner has 16GB; a swap file is
-          # cheaper and more predictable than an unpinned third-party action.
+          set -euo pipefail
+
           sudo fallocate -l 8G /mnt/swapfile
           sudo chmod 600 /mnt/swapfile
           sudo mkswap /mnt/swapfile
           sudo swapon /mnt/swapfile
+
+          echo
+          echo "===== Memory ====="
           free -h
 
+
+      # ==========================================================
+      # Dependencies
+      # ==========================================================
+
       - name: Install build dependencies
+        shell: bash
         run: |
+          set -euo pipefail
+
           sudo apt-get update -qq
-          # Kept deliberately lean. The historical list here was copied from the
-          # full AOSP platform build docs and pulled in ~40 packages a kernel
-          # build never touches, several of which no longer exist on current
-          # Ubuntu (python2, lib32ncurses5-dev, ...).
+
           sudo apt-get install -y --no-install-recommends \
-            bc bison build-essential ccache cpio curl device-tree-compiler flex \
-            git libelf-dev libssl-dev lz4 make python3 rsync unzip zip zstd \
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            cpio \
+            curl \
+            device-tree-compiler \
+            flex \
+            git \
+            libelf-dev \
+            libssl-dev \
+            lz4 \
+            make \
+            python3 \
+            rsync \
+            unzip \
+            zip \
+            zstd \
             libncurses-dev
+
           mkdir -p "$WORKSPACE"
+
+
+      # ==========================================================
+      # Toolchain
+      # ==========================================================
 
       - name: Set up toolchain
         run: bash scripts/toolchain.sh
 
+
+      # ==========================================================
+      # Kernel source
+      #
+      # KERNEL_SOURCE and KERNEL_SOURCE_BRANCH are read from:
+      # config/reno7se-mt6877.env
+      # ==========================================================
+
       - name: Fetch kernel source
         run: bash scripts/source.sh
+
+
+      # ==========================================================
+      # OPPO MT6877 external vendor kernel sources
+      #
+      # IMPORTANT:
+      #
+      # android_kernel_oppo_mt6877 contains paths such as:
+      #
+      # kernel/sched_assist
+      # kernel/locking/klockopt
+      # kernel/uifirst
+      # include/linux/sched_assist
+      #
+      # which point into:
+      #
+      # vendor/oplus/kernel/...
+      #
+      # The actual vendor source is stored in:
+      #
+      # oppo-source/android_kernel_modules_oppo_mt6877
+      # ==========================================================
+
+      - name: Checkout OPPO MT6877 kernel modules
+        uses: actions/checkout@v4
+        with:
+          repository: oppo-source/android_kernel_modules_oppo_mt6877
+          ref: oppo/mt6877_t_13.1.0_reno7_se_5g
+          path: kernel_workspace/oppo-kernel-modules
+          fetch-depth: 1
+
+
+      # ==========================================================
+      # Merge OPPO vendor source into kernel tree
+      # ==========================================================
+
+      - name: Install OPPO MT6877 vendor sources
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MODULES_DIR="$WORKSPACE/oppo-kernel-modules"
+
+          echo "=============================================="
+          echo " OPPO Reno7 SE 5G / MT6877 Vendor Integration"
+          echo "=============================================="
+          echo
+          echo "Kernel directory:"
+          echo "  $KERNEL_DIR"
+          echo
+          echo "Modules directory:"
+          echo "  $MODULES_DIR"
+          echo
+
+          # ------------------------------------------------------
+          # Verify external module repository
+          # ------------------------------------------------------
+
+          if [ ! -d "$MODULES_DIR/vendor" ]; then
+            echo "::error::OPPO vendor source directory not found"
+            echo "::error::$MODULES_DIR/vendor"
+            exit 1
+          fi
+
+          echo "Vendor source found:"
+          du -sh "$MODULES_DIR/vendor"
+
+          echo
+          echo "Installing vendor tree..."
+
+          # Remove incomplete/stale vendor tree if present.
+          rm -rf "$KERNEL_DIR/vendor"
+
+          cp -a \
+            "$MODULES_DIR/vendor" \
+            "$KERNEL_DIR/vendor"
+
+          echo
+          echo "Installed vendor tree:"
+          du -sh "$KERNEL_DIR/vendor"
+
+
+          # ------------------------------------------------------
+          # Required OPPO paths
+          # ------------------------------------------------------
+
+          echo
+          echo "=============================================="
+          echo " Checking required OPPO vendor paths"
+          echo "=============================================="
+
+          required_files=(
+            "kernel/sched_assist/Kconfig"
+            "kernel/locking/klockopt/Kconfig"
+          )
+
+          for file in "${required_files[@]}"; do
+            if [ ! -f "$KERNEL_DIR/$file" ]; then
+              echo "::error::Missing required OPPO vendor file:"
+              echo "::error::$file"
+
+              echo
+              echo "Link information:"
+              ls -la "$KERNEL_DIR/$(dirname "$file")" || true
+
+              exit 1
+            fi
+
+            echo "OK: $file"
+          done
+
+
+          # ------------------------------------------------------
+          # Other OPPO symlinked components
+          # ------------------------------------------------------
+
+          echo
+          echo "Checking additional OPPO paths..."
+
+          optional_paths=(
+            "kernel/uifirst"
+            "kernel/prefer_silver"
+            "include/linux/sched_assist"
+            "include/linux/uifirst"
+            "include/linux/iomonitor"
+            "include/linux/healthinfo"
+            "drivers/soc/oplus"
+            "mm/task_mem"
+            "mm/malloc_track"
+            "mm/oppo_healthinfo"
+          )
+
+          for path in "${optional_paths[@]}"; do
+            if [ -e "$KERNEL_DIR/$path" ]; then
+              echo "OK: $path"
+            else
+              echo "::warning::OPPO vendor path unavailable: $path"
+            fi
+          done
+
+
+          # ------------------------------------------------------
+          # sched_assist diagnostics
+          # ------------------------------------------------------
+
+          echo
+          echo "=============================================="
+          echo " sched_assist"
+          echo "=============================================="
+
+          ls -la "$KERNEL_DIR/kernel/sched_assist" || true
+
+          echo
+          echo "Resolved Kconfig:"
+          realpath "$KERNEL_DIR/kernel/sched_assist/Kconfig"
+
+
+          # ------------------------------------------------------
+          # klockopt diagnostics
+          # ------------------------------------------------------
+
+          echo
+          echo "=============================================="
+          echo " klockopt"
+          echo "=============================================="
+
+          ls -la "$KERNEL_DIR/kernel/locking/klockopt" || true
+
+          echo
+          echo "Resolved Kconfig:"
+          realpath "$KERNEL_DIR/kernel/locking/klockopt/Kconfig"
+
+
+          # ------------------------------------------------------
+          # Final verification
+          # ------------------------------------------------------
+
+          echo
+          echo "=============================================="
+          echo " OPPO vendor source integration successful"
+          echo "=============================================="
+
+
+      # ==========================================================
+      # KernelSU / SukiSU-Ultra
+      #
+      # Recommended Reno7 SE config:
+      #
+      # KSU_VARIANT=sukisu-ultra
+      # KSU_REF=builtin
+      # KSU_HOOK_MODE=manual
+      # ==========================================================
 
       - name: Install KernelSU
         if: env.KSU_VARIANT != 'none'
         run: bash scripts/kernelsu.sh
 
+
+      # ==========================================================
+      # Kernel patches
+      #
+      # Handles:
+      #
+      # - path_umount
+      # - manual hooks
+      # - SUSFS
+      # - hide_stuff
+      # ==========================================================
+
       - name: Apply kernel patches
         run: bash scripts/patches.sh all
+
+
+      # ==========================================================
+      # ccache
+      # ==========================================================
 
       - name: Set up ccache
         if: env.ENABLE_CCACHE == 'true'
@@ -185,14 +531,37 @@ jobs:
           key: kernel-${{ env.DEVICE }}-${{ env.KSU_VARIANT }}-${{ env.KERNEL_VERSION }}
           max-size: 2G
 
+
+      # ==========================================================
+      # Build kernel
+      # ==========================================================
+
       - name: Build kernel
         run: bash scripts/build.sh all
+
+
+      # ==========================================================
+      # Package
+      #
+      # Outputs:
+      #
+      # - raw Image/Image.gz
+      # - AnyKernel3
+      # - optional dtbo.img
+      # - optional boot.img
+      # ==========================================================
 
       - name: Package artifacts
         run: bash scripts/package.sh all
 
+
+      # ==========================================================
+      # Export metadata
+      # ==========================================================
+
       - name: Export build metadata
         id: meta
+        shell: bash
         run: |
           {
             echo "device=${DEVICE}"
@@ -203,12 +572,22 @@ jobs:
             echo "susfs_version=${SUSFS_VERSION:-}"
           } >> "$GITHUB_OUTPUT"
 
+
+      # ==========================================================
+      # Upload raw kernel
+      # ==========================================================
+
       - name: Upload kernel image
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.KERNEL_IMAGE_NAME }}${{ env.LOCALVERSION }}${{ env.UPLOADNAME }}-${{ env.DEVICE }}-${{ env.BUILD_TIME }}
           path: kernel_workspace/android-kernel/out/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE_NAME }}
           if-no-files-found: error
+
+
+      # ==========================================================
+      # Upload AnyKernel3
+      # ==========================================================
 
       - name: Upload AnyKernel3
         uses: actions/upload-artifact@v4
@@ -217,12 +596,23 @@ jobs:
           path: kernel_workspace/AnyKernel3/*
           if-no-files-found: error
 
+
+      # ==========================================================
+      # Upload DTBO
+      # ==========================================================
+
       - name: Upload DTBO image
         if: env.CHECK_DTBO_IS_OK == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: dtbo-${{ env.DEVICE }}-${{ env.BUILD_TIME }}
           path: kernel_workspace/android-kernel/out/arch/${{ env.ARCH }}/boot/dtbo.img
+          if-no-files-found: error
+
+
+      # ==========================================================
+      # Upload repacked boot.img
+      # ==========================================================
 
       - name: Upload boot image
         if: env.MAKE_BOOT_IMAGE_IS_OK == 'true'
@@ -230,49 +620,149 @@ jobs:
         with:
           name: boot${{ env.LOCALVERSION }}${{ env.UPLOADNAME }}-${{ env.DEVICE }}-${{ env.BUILD_TIME }}
           path: kernel_workspace/boot.img
+          if-no-files-found: error
 
-  # Publishing is a separate job so the build itself runs with a read-only
-  # token; only this job gets contents:write, and only when asked for.
+
+      # ==========================================================
+      # Upload useful diagnostics when build fails
+      # ==========================================================
+
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Reno7SE-MT6877-build-diagnostics-${{ github.run_number }}
+          if-no-files-found: ignore
+          path: |
+            kernel_workspace/android-kernel/out/.config
+            kernel_workspace/android-kernel/out/include/generated/autoconf.h
+            kernel_workspace/android-kernel/arch/arm64/configs/k6877v1_64_k419_defconfig
+
+
+  # ============================================================
+  # Optional GitHub Release
+  # ============================================================
+
   release:
     name: Publish release
+
     needs: build
+
     if: inputs.publish_release
+
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
+
     steps:
+      # ----------------------------------------------------------
+      # Download all build artifacts
+      # ----------------------------------------------------------
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: false
 
-      - name: Package AnyKernel3 as a flashable zip
+
+      # ----------------------------------------------------------
+      # Turn AnyKernel3 directory into a flashable ZIP
+      # ----------------------------------------------------------
+
+      - name: Package release files
+        shell: bash
         run: |
+          set -euo pipefail
+
           mkdir -p release
+
           shopt -s nullglob
+
+          echo "=============================================="
+          echo " Packaging AnyKernel3"
+          echo "=============================================="
+
           for dir in artifacts/AnyKernel3*/; do
             name=$(basename "${dir%/}")
-            (cd "$dir" && zip -qr9 "${GITHUB_WORKSPACE}/release/${name}.zip" .)
-            echo "packed ${name}.zip"
+
+            echo "Packing: $name"
+
+            (
+              cd "$dir"
+              zip -qr9 \
+                "${GITHUB_WORKSPACE}/release/${name}.zip" \
+                .
+            )
           done
-          for f in artifacts/*/Image* artifacts/*/boot.img artifacts/*/dtbo.img; do
-            [ -f "$f" ] && cp "$f" release/
+
+
+          # ------------------------------------------------------
+          # Copy raw kernel / boot / dtbo into release directory
+          # ------------------------------------------------------
+
+          echo
+          echo "Copying raw images..."
+
+          for f in \
+            artifacts/*/Image* \
+            artifacts/*/boot.img \
+            artifacts/*/dtbo.img
+          do
+            if [ -f "$f" ]; then
+              cp "$f" release/
+            fi
           done
-          ls -la release/
+
+
+          echo
+          echo "=============================================="
+          echo " Release files"
+          echo "=============================================="
+
+          ls -lah release/
+
+
+      # ----------------------------------------------------------
+      # Publish GitHub Release
+      # ----------------------------------------------------------
 
       - name: Create release
-        uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8 # v2.3.2
+        uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8
         with:
           tag_name: ${{ needs.build.outputs.device }}-${{ needs.build.outputs.build_time }}
-          name: ${{ needs.build.outputs.device }} · ${{ needs.build.outputs.ksu_name }} · ${{ needs.build.outputs.build_time }}
+
+          name: >-
+            ${{ needs.build.outputs.device }}
+            ·
+            ${{ needs.build.outputs.ksu_name }}
+            ·
+            ${{ needs.build.outputs.build_time }}
+
           body: |
-            | | |
+            ## OPPO Reno7 SE 5G Kernel Build
+
+            | Item | Value |
             | --- | --- |
             | Device | `${{ needs.build.outputs.device }}` |
             | Kernel | `${{ needs.build.outputs.kernel_release }}` |
-            | KernelSU | `${{ needs.build.outputs.ksu_name }}` @ `${{ needs.build.outputs.ksu_version }}` |
+            | KernelSU | `${{ needs.build.outputs.ksu_name }}` |
+            | KernelSU Version | `${{ needs.build.outputs.ksu_version }}` |
             | SUSFS | `${{ needs.build.outputs.susfs_version || 'not applied' }}` |
 
-            Flash the AnyKernel3 zip from a custom recovery.
+            ### Target
+
+            - OPPO Reno7 SE 5G
+            - MediaTek MT6877
+            - Linux 4.19
+            - arm64
+            - SukiSU-Ultra builtin
+            - Non-GKI
+
+            ### Important
+
+            The AnyKernel3 package is intended for testing.
+            Keep a known-good stock boot image available before flashing.
+
           files: release/*
