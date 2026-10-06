@@ -525,6 +525,41 @@ jobs:
 
 
       # ========================================================
+      # Image.gz-only build policy
+      #
+      # OPPO's published MT6877 source enables appended DTB and
+      # DT overlay image generation, but the public source tree
+      # does not contain product files such as:
+      #
+      #   oplus6877_20181/cust.dtsi
+      #
+      # We are intentionally building only Image.gz and will
+      # preserve the exact stock boot/vendor DT data when the
+      # stock boot image is repacked. Therefore disable those
+      # incomplete public-source DT image build paths.
+      # ========================================================
+
+      - name: Configure Image.gz-only build
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          EXTRA="${EXTRA_DEFCONFIG:-}"
+          EXTRA="$EXTRA CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE=n"
+          EXTRA="$EXTRA CONFIG_BUILD_ARM64_DTB_OVERLAY_IMAGE=n"
+
+          echo "EXTRA_DEFCONFIG=$EXTRA" >> "$GITHUB_ENV"
+
+          echo "=============================================="
+          echo " Image.gz-only build policy"
+          echo "=============================================="
+          echo "CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE=n"
+          echo "CONFIG_BUILD_ARM64_DTB_OVERLAY_IMAGE=n"
+          echo
+          echo "Stock DTB/DTBO data will be preserved during boot.img repack."
+
+
+      # ========================================================
       # OPPO vendor compatibility fixes
       #
       # Fixes currently required by the official source release:
@@ -635,7 +670,8 @@ jobs:
           # ----------------------------------------------------
 
           CHARGER_HEADER="$VENDOR_DIR/oplus/kernel/charger/charger_ic/oplus_battery_mtk6877R.h"
-          CHARGER_V1_MAKEFILE="$VENDOR_DIR/oplus/kernel/charger/v1/Makefile"
+          CHARGER_ADAPTER_MAKEFILE="$VENDOR_DIR/oplus/kernel/charger/adapter_ic/Makefile"
+          CHARGER_IC_MAKEFILE="$VENDOR_DIR/oplus/kernel/charger/charger_ic/Makefile"
 
           echo
           echo "=============================================="
@@ -643,7 +679,8 @@ jobs:
           echo "=============================================="
 
           test -f "$CHARGER_HEADER"
-          test -f "$CHARGER_V1_MAKEFILE"
+          test -f "$CHARGER_ADAPTER_MAKEFILE"
+          test -f "$CHARGER_IC_MAKEFILE"
 
           required_headers=(
             "drivers/misc/mediatek/typec/tcpc/inc/tcpm.h"
@@ -718,41 +755,49 @@ jobs:
 
 
           # ----------------------------------------------------
-          # Make the corresponding kernel header directories
-          # available to charger/v1 and its adapter_ic /
-          # charger_ic descendants.
+          # Put the include paths directly into the actual child
+          # Makefiles that compile adapter_ic and charger_ic.
+          #
+          # This is deliberate: charger/v1 contains symlinks such
+          # as adapter_ic -> ../adapter_ic. Parent
+          # subdir-ccflags-y is not reliable enough across that
+          # released vendor symlink layout. ccflags-y in the child
+          # Makefiles is deterministic for the affected objects.
           # ----------------------------------------------------
 
-          python3 - "$CHARGER_V1_MAKEFILE" <<'PY'
+          python3 - \
+            "$CHARGER_ADAPTER_MAKEFILE" \
+            "$CHARGER_IC_MAKEFILE" <<'PY'
           from pathlib import Path
           import sys
 
-          path = Path(sys.argv[1])
-          text = path.read_text()
-
           required_lines = [
-              "subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc",
-              "subdir-ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger",
+              "ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc",
+              "ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger",
           ]
 
-          missing = [
-              line for line in required_lines
-              if line not in text
-          ]
+          for raw in sys.argv[1:]:
+              path = Path(raw)
+              text = path.read_text()
 
-          if missing:
-              if not text.endswith("\n"):
-                  text += "\n"
+              missing = [
+                  line for line in required_lines
+                  if line not in text
+              ]
 
-              text += "\n# OPPO MT6877 external kernel include compatibility\n"
+              if missing:
+                  if not text.endswith("\n"):
+                      text += "\n"
 
-              for line in missing:
-                  text += line + "\n"
-                  print(f"[ OK ] adding: {line}")
+                  text += "\n# OPPO MT6877 kernel header compatibility\n"
 
-              path.write_text(text)
-          else:
-              print("Required charger include paths already present.")
+                  for line in missing:
+                      text += line + "\n"
+                      print(f"[ OK ] {path}: {line}")
+
+                  path.write_text(text)
+              else:
+                  print(f"[SKIP] include paths already present: {path}")
           PY
 
 
@@ -765,12 +810,20 @@ jobs:
             "$CHARGER_HEADER"
 
           echo
-          echo "charger/v1 include paths:"
+          echo "adapter_ic include paths:"
 
           grep \
             -nE \
             'typec/tcpc/inc|power/supply/mediatek/charger' \
-            "$CHARGER_V1_MAKEFILE"
+            "$CHARGER_ADAPTER_MAKEFILE"
+
+          echo
+          echo "charger_ic include paths:"
+
+          grep \
+            -nE \
+            'typec/tcpc/inc|power/supply/mediatek/charger' \
+            "$CHARGER_IC_MAKEFILE"
 
           if grep -q '../../../../kernel-4.19/' "$CHARGER_HEADER"; then
             echo "::error::kernel-4.19 hardcoded include remains in MT6877 charger header"
@@ -1200,6 +1253,16 @@ jobs:
 
           if grep -q '^CONFIG_MODULE_SIG_FORCE=y' "$CONFIG"; then
             echo "::error::CONFIG_MODULE_SIG_FORCE is still enabled."
+            exit 1
+          fi
+
+          if grep -q '^CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE=y' "$CONFIG"; then
+            echo "::error::APPENDED_DTB build is still enabled."
+            exit 1
+          fi
+
+          if grep -q '^CONFIG_BUILD_ARM64_DTB_OVERLAY_IMAGE=y' "$CONFIG"; then
+            echo "::error::DTB overlay image build is still enabled."
             exit 1
           fi
 
