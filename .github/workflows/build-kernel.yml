@@ -150,7 +150,7 @@ on:
 
 
 concurrency:
-  group: kernel-${{ github.ref }}-${{ inputs.config }}
+  group: reno7se-kernel-${{ github.ref }}-${{ inputs.config }}
   cancel-in-progress: true
 
 
@@ -159,11 +159,6 @@ permissions:
 
 
 jobs:
-
-  # ============================================================
-  # Build
-  # ============================================================
-
   build:
     name: Build Reno7 SE MT6877
 
@@ -187,7 +182,6 @@ jobs:
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
 
-      # Workflow input overrides
       IN_KSU_VARIANT: ${{ inputs.ksu_variant }}
       IN_KSU_REF: ${{ inputs.ksu_ref }}
       IN_KSU_HOOK_MODE: ${{ inputs.hook_mode }}
@@ -200,7 +194,7 @@ jobs:
     steps:
 
       # ========================================================
-      # KernelSU_Action source
+      # Checkout KernelSU_Action
       # ========================================================
 
       - name: Checkout KernelSU Action
@@ -210,19 +204,18 @@ jobs:
 
 
       # ========================================================
-      # Read device config
+      # Resolve config
       # ========================================================
 
       - name: Resolve configuration
         shell: bash
         run: |
           set -euo pipefail
-
           bash scripts/config.sh
 
 
       # ========================================================
-      # Runner
+      # Runner cleanup
       # ========================================================
 
       - name: Free disk space
@@ -238,6 +231,10 @@ jobs:
           swap-storage: false
 
 
+      # ========================================================
+      # Swap
+      # ========================================================
+
       - name: Add swap
         shell: bash
         run: |
@@ -249,6 +246,7 @@ jobs:
           sudo swapon /mnt/swapfile
 
           echo
+          echo "===== Memory ====="
           free -h
 
 
@@ -275,6 +273,7 @@ jobs:
             git \
             libelf-dev \
             libssl-dev \
+            libncurses-dev \
             lz4 \
             make \
             python3 \
@@ -282,7 +281,7 @@ jobs:
             unzip \
             zip \
             zstd \
-            libncurses-dev
+            binutils-aarch64-linux-gnu
 
           mkdir -p "$WORKSPACE"
 
@@ -295,18 +294,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           bash scripts/toolchain.sh
 
 
       # ========================================================
-      # OPPO compatibility toolchain
+      # OPPO MTK toolchain compatibility
       #
-      # OPPO's 4.19 tree uses CROSS_COMPILE_COMPAT for vdso32.
+      # OPPO 4.19 uses CROSS_COMPILE_COMPAT for vdso32.
+      # KernelSU_Action normally exports CROSS_COMPILE_ARM32.
       #
-      # KernelSU_Action normally exports CROSS_COMPILE_ARM32,
-      # therefore expose the same GCC 4.9 toolchain under
-      # CROSS_COMPILE_COMPAT too.
+      # Convert downloaded GCC32 path to OPPO's variable.
       # ========================================================
 
       - name: Configure OPPO MTK toolchain
@@ -314,68 +311,49 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Configuring OPPO MT6877 toolchain..."
+          echo "=============================================="
+          echo " OPPO MT6877 Toolchain Compatibility"
+          echo "=============================================="
 
           ARM32_PREFIX="$WORKSPACE/gcc-32/bin/arm-linux-androideabi-"
 
-          if [ -x "${ARM32_PREFIX}gcc" ]; then
-            echo "32-bit GCC found:"
-            "${ARM32_PREFIX}gcc" --version | head -n 1
-
-            echo \
-              "CUSTOM_CMDS=CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=${ARM32_PREFIX}" \
-              >> "$GITHUB_ENV"
-          else
-            echo "::warning::32-bit GCC was not found at:"
-            echo "::warning::${ARM32_PREFIX}gcc"
-
-            echo \
-              "CUSTOM_CMDS=CLANG_TRIPLE=aarch64-linux-gnu-" \
-              >> "$GITHUB_ENV"
+          if [ ! -x "${ARM32_PREFIX}gcc" ]; then
+            echo "::error::ARM32 GCC not found:"
+            echo "::error::${ARM32_PREFIX}gcc"
+            exit 1
           fi
+
+          echo
+          echo "ARM32 compiler:"
+          "${ARM32_PREFIX}gcc" --version | head -n 1
+
+          echo
+          echo "AArch64 binutils:"
+          command -v aarch64-linux-gnu-ld || true
+
+          # Override CUSTOM_CMDS exported by config.sh.
+          #
+          # The absolute path is important because the downloaded GCC32
+          # directory is not otherwise guaranteed to expose the prefix
+          # expected by OPPO's vdso32 build.
+          echo \
+            "CUSTOM_CMDS=CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=${ARM32_PREFIX}" \
+            >> "$GITHUB_ENV"
 
 
       # ========================================================
-      # OPPO kernel
+      # OPPO kernel source
       # ========================================================
 
       - name: Fetch OPPO kernel source
         shell: bash
         run: |
           set -euo pipefail
-
           bash scripts/source.sh
 
 
       # ========================================================
       # OPPO external modules
-      #
-      # Main kernel:
-      #   android_kernel_oppo_mt6877
-      #
-      # Vendor sources:
-      #   android_kernel_modules_oppo_mt6877
-      #
-      # Important:
-      #
-      # OPPO kernel paths such as:
-      #
-      # kernel/sched_assist
-      #
-      # point to:
-      #
-      # ../../vendor/oplus/...
-      #
-      # Therefore "vendor" must be placed beside android-kernel,
-      # not inside android-kernel.
-      #
-      # Correct:
-      #
-      # kernel_workspace/
-      # ├─ android-kernel/
-      # ├─ vendor/
-      # └─ oppo-kernel-modules/
-      #
       # ========================================================
 
       - name: Checkout OPPO MT6877 kernel modules
@@ -387,47 +365,83 @@ jobs:
           fetch-depth: 1
 
 
+      # ========================================================
+      # Reconstruct OPPO original vendor layout
+      #
+      # OPPO's released kernel contains multiple styles of
+      # relative links.
+      #
+      # Example:
+      #
+      # kernel/sched_assist
+      #   -> ../../vendor/oplus/...
+      #
+      # resolves to:
+      #
+      # kernel_workspace/vendor
+      #
+      # But:
+      #
+      # drivers/base/kernelFwUpdate
+      #   -> ../../../../vnd/vendor/oplus/...
+      #
+      # resolves to:
+      #
+      # $GITHUB_WORKSPACE/vnd/vendor
+      #
+      # We therefore expose the SAME vendor repository at both
+      # expected locations.
+      # ========================================================
+
       - name: Install OPPO MT6877 vendor sources
         shell: bash
         run: |
           set -euo pipefail
 
           MODULES_DIR="$WORKSPACE/oppo-kernel-modules"
-          VENDOR_DIR="$WORKSPACE/vendor"
+
+          WORKSPACE_VENDOR="$WORKSPACE/vendor"
+
+          VND_ROOT="$GITHUB_WORKSPACE/vnd"
+          VND_VENDOR="$VND_ROOT/vendor"
 
           echo "=============================================="
           echo " OPPO Reno7 SE 5G / MT6877 Vendor Integration"
           echo "=============================================="
 
           echo
-          echo "Workspace:"
+          echo "GitHub workspace:"
+          echo "  $GITHUB_WORKSPACE"
+
+          echo
+          echo "Kernel workspace:"
           echo "  $WORKSPACE"
 
           echo
-          echo "Kernel:"
+          echo "Kernel directory:"
           echo "  $KERNEL_DIR"
 
           echo
-          echo "Modules:"
+          echo "Modules directory:"
           echo "  $MODULES_DIR"
-
-          echo
-          echo "Vendor destination:"
-          echo "  $VENDOR_DIR"
 
 
           # ----------------------------------------------------
-          # Verify module repository
+          # Verify modules repository
           # ----------------------------------------------------
 
           if [ ! -d "$MODULES_DIR/vendor" ]; then
-            echo "::error::OPPO vendor source not found"
+
+            echo "::error::OPPO modules repository does not contain vendor/"
             echo "::error::$MODULES_DIR/vendor"
+
+            echo
+            echo "Repository layout:"
 
             find "$MODULES_DIR" \
               -maxdepth 2 \
               -type d \
-              2>/dev/null | head -50 || true
+              2>/dev/null | head -80 || true
 
             exit 1
           fi
@@ -440,36 +454,84 @@ jobs:
 
 
           # ----------------------------------------------------
-          # Remove old incorrect layout
+          # Clean incorrect/stale mappings
           # ----------------------------------------------------
+
+          echo
+          echo "Cleaning stale vendor mappings..."
 
           rm -rf "$KERNEL_DIR/vendor"
 
-          rm -rf "$VENDOR_DIR"
+          rm -rf "$WORKSPACE_VENDOR"
+
+          mkdir -p "$VND_ROOT"
+
+          rm -rf "$VND_VENDOR"
 
 
           # ----------------------------------------------------
-          # OPPO expects vendor beside kernel source
+          # Layout #1
+          #
+          # kernel_workspace/vendor
           # ----------------------------------------------------
+
+          echo
+          echo "Creating:"
+          echo "  $WORKSPACE_VENDOR"
 
           ln -s \
             "$MODULES_DIR/vendor" \
-            "$VENDOR_DIR"
-
-
-          echo
-          echo "Vendor link:"
-
-          ls -la "$VENDOR_DIR"
-
-          echo
-          echo "Resolved vendor path:"
-
-          realpath "$VENDOR_DIR"
+            "$WORKSPACE_VENDOR"
 
 
           # ----------------------------------------------------
-          # Required OPPO components
+          # Layout #2
+          #
+          # <repo>/vnd/vendor
+          # ----------------------------------------------------
+
+          echo
+          echo "Creating:"
+          echo "  $VND_VENDOR"
+
+          ln -s \
+            "$MODULES_DIR/vendor" \
+            "$VND_VENDOR"
+
+
+          # ----------------------------------------------------
+          # Verify mappings
+          # ----------------------------------------------------
+
+          echo
+          echo "=============================================="
+          echo " Vendor mappings"
+          echo "=============================================="
+
+          echo
+          echo "[1] kernel_workspace/vendor"
+
+          ls -la "$WORKSPACE_VENDOR"
+
+          echo
+          echo "Resolved:"
+
+          realpath "$WORKSPACE_VENDOR"
+
+
+          echo
+          echo "[2] vnd/vendor"
+
+          ls -la "$VND_VENDOR"
+
+          echo
+          echo "Resolved:"
+
+          realpath "$VND_VENDOR"
+
+
+          # ----------------------------------------------------
+          # Critical OPPO components
           # ----------------------------------------------------
 
           echo
@@ -480,6 +542,7 @@ jobs:
           required_files=(
             "kernel/sched_assist/Kconfig"
             "kernel/locking/klockopt/Kconfig"
+            "drivers/base/kernelFwUpdate/Kconfig"
           )
 
           for file in "${required_files[@]}"; do
@@ -490,42 +553,58 @@ jobs:
 
             if [ ! -f "$KERNEL_DIR/$file" ]; then
 
-              echo "::error::Required OPPO component is missing:"
+              echo "::error::Missing required OPPO component:"
               echo "::error::$file"
 
               echo
-              echo "Parent path:"
+              echo "Object:"
+
+              ls -la \
+                "$KERNEL_DIR/$file" \
+                2>/dev/null || true
+
+              echo
+              echo "Parent directory:"
 
               ls -la \
                 "$KERNEL_DIR/$(dirname "$file")" \
-                || true
-
-              echo
-              echo "Vendor Kconfig files:"
-
-              find \
-                "$VENDOR_DIR/oplus/kernel" \
-                -name Kconfig \
-                -type f \
-                2>/dev/null | head -50 || true
+                2>/dev/null || true
 
               exit 1
             fi
 
-            echo "OK"
-
+            echo "OK:"
             realpath "$KERNEL_DIR/$file"
 
           done
 
 
           # ----------------------------------------------------
-          # Additional OPPO paths
+          # Verify actual kernelFwUpdate source
           # ----------------------------------------------------
 
           echo
           echo "=============================================="
-          echo " Checking optional OPPO components"
+          echo " kernelFwUpdate source"
+          echo "=============================================="
+
+          FW_DIR="$MODULES_DIR/vendor/oplus/kernel/touchpanel/kernelFwUpdate"
+
+          test -f "$FW_DIR/Kconfig"
+          test -f "$FW_DIR/Makefile"
+          test -f "$FW_DIR/kernelFwUpdate.c"
+          test -f "$FW_DIR/kernelFwUpdate.h"
+
+          ls -la "$FW_DIR"
+
+
+          # ----------------------------------------------------
+          # Optional OPPO paths
+          # ----------------------------------------------------
+
+          echo
+          echo "=============================================="
+          echo " Additional OPPO paths"
           echo "=============================================="
 
           optional_paths=(
@@ -545,11 +624,9 @@ jobs:
 
             if [ -e "$KERNEL_DIR/$path" ]; then
 
+              echo
               echo "OK: $path"
-
-              realpath \
-                "$KERNEL_DIR/$path" \
-                2>/dev/null || true
+              realpath "$KERNEL_DIR/$path" 2>/dev/null || true
 
             else
 
@@ -561,7 +638,55 @@ jobs:
 
 
           # ----------------------------------------------------
-          # sched_assist diagnostics
+          # Broken symlink diagnostics
+          # ----------------------------------------------------
+
+          echo
+          echo "=============================================="
+          echo " Broken symlink scan"
+          echo "=============================================="
+
+          mapfile -t BROKEN_LINKS < <(
+            find "$KERNEL_DIR" \
+              -xtype l \
+              -print \
+              2>/dev/null || true
+          )
+
+          BROKEN_COUNT="${#BROKEN_LINKS[@]}"
+
+          echo
+          echo "Broken symlink count:"
+          echo "  $BROKEN_COUNT"
+
+          if [ "$BROKEN_COUNT" -gt 0 ]; then
+
+            echo
+            echo "First broken links:"
+
+            LIMIT=100
+            INDEX=0
+
+            for link in "${BROKEN_LINKS[@]}"; do
+
+              echo
+              echo "${link#$KERNEL_DIR/}"
+
+              ls -la "$link" || true
+
+              INDEX=$((INDEX + 1))
+
+              if [ "$INDEX" -ge "$LIMIT" ]; then
+                break
+              fi
+
+            done
+
+          fi
+
+
+          # ----------------------------------------------------
+          # Main path diagnostics
           # ----------------------------------------------------
 
           echo
@@ -569,31 +694,47 @@ jobs:
           echo " sched_assist"
           echo "=============================================="
 
-          ls -la \
-            "$KERNEL_DIR/kernel/sched_assist"
+          ls -la "$KERNEL_DIR/kernel/sched_assist"
 
           echo
+          echo "Resolved:"
+          realpath "$KERNEL_DIR/kernel/sched_assist"
 
-          realpath \
-            "$KERNEL_DIR/kernel/sched_assist/Kconfig"
+          echo
+          echo "Kconfig:"
+          realpath "$KERNEL_DIR/kernel/sched_assist/Kconfig"
 
-
-          # ----------------------------------------------------
-          # klockopt diagnostics
-          # ----------------------------------------------------
 
           echo
           echo "=============================================="
           echo " klockopt"
           echo "=============================================="
 
-          ls -la \
-            "$KERNEL_DIR/kernel/locking/klockopt"
+          ls -la "$KERNEL_DIR/kernel/locking/klockopt"
 
           echo
+          echo "Resolved:"
+          realpath "$KERNEL_DIR/kernel/locking/klockopt"
 
-          realpath \
-            "$KERNEL_DIR/kernel/locking/klockopt/Kconfig"
+          echo
+          echo "Kconfig:"
+          realpath "$KERNEL_DIR/kernel/locking/klockopt/Kconfig"
+
+
+          echo
+          echo "=============================================="
+          echo " kernelFwUpdate"
+          echo "=============================================="
+
+          ls -la "$KERNEL_DIR/drivers/base/kernelFwUpdate"
+
+          echo
+          echo "Resolved:"
+          realpath "$KERNEL_DIR/drivers/base/kernelFwUpdate"
+
+          echo
+          echo "Kconfig:"
+          realpath "$KERNEL_DIR/drivers/base/kernelFwUpdate/Kconfig"
 
 
           echo
@@ -611,19 +752,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           bash scripts/kernelsu.sh
 
 
       # ========================================================
       # Patches
       #
-      # Handles:
+      # Current Reno7 SE config:
       #
-      # path_umount
-      # manual hooks
-      # SUSFS
-      # hide_stuff
+      # path_umount = enabled
+      # manual hook = enabled
+      # SUSFS       = disabled
+      # KPM         = disabled
       #
       # ========================================================
 
@@ -631,7 +771,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           bash scripts/patches.sh all
 
 
@@ -644,8 +783,10 @@ jobs:
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: >-
-            mt6877-${{ env.KERNEL_VERSION }}-${{
-            env.KSU_VARIANT }}-${{ env.KSU_HOOK_MODE }}
+            reno7se-mt6877-${{
+            env.KERNEL_VERSION }}-${{
+            env.KSU_VARIANT }}-${{
+            env.KSU_HOOK_MODE }}
           max-size: 2G
 
 
@@ -660,6 +801,11 @@ jobs:
 
           LOG="$WORKSPACE/build.log"
 
+          echo "=============================================="
+          echo " Building OPPO Reno7 SE 5G kernel"
+          echo "=============================================="
+
+          echo
           echo "Build log:"
           echo "  $LOG"
 
@@ -673,33 +819,34 @@ jobs:
           set -e
 
           if [ "$STATUS" -ne 0 ]; then
+
             echo
             echo "::error::Kernel build failed with status $STATUS"
+
+            echo
+            echo "=============================================="
+            echo " Last 200 build log lines"
+            echo "=============================================="
+
+            tail -n 200 "$LOG" || true
+
             exit "$STATUS"
           fi
 
 
       # ========================================================
       # Package
-      #
-      # Generates:
-      #
-      # Image.gz
-      # AnyKernel3
-      # optional boot.img
-      #
       # ========================================================
 
       - name: Package artifacts
         shell: bash
         run: |
           set -euo pipefail
-
           bash scripts/package.sh all
 
 
       # ========================================================
-      # Build metadata
+      # Metadata
       # ========================================================
 
       - name: Export build metadata
@@ -712,7 +859,7 @@ jobs:
             echo "ksu_name=${KSU_NAME:-none}"
             echo "ksu_version=${KSU_VERSION_LABEL:-}"
             echo "kernel_release=${KERNEL_RELEASE:-}"
-            echo "susfs_version=${SUSFS_VERSION:-}"
+            echo "susfs_version=${SUSFS_VERSION:-disabled}"
           } >> "$GITHUB_OUTPUT"
 
 
@@ -725,11 +872,13 @@ jobs:
         with:
           name: >-
             Reno7SE-MT6877-${{
-            env.KERNEL_IMAGE_NAME }}-${{ env.BUILD_TIME }}
+            env.KERNEL_IMAGE_NAME }}-${{
+            env.BUILD_TIME }}
 
           path: >-
             kernel_workspace/android-kernel/out/arch/${{
-            env.ARCH }}/boot/${{ env.KERNEL_IMAGE_NAME }}
+            env.ARCH }}/boot/${{
+            env.KERNEL_IMAGE_NAME }}
 
           if-no-files-found: error
 
@@ -743,7 +892,8 @@ jobs:
         with:
           name: >-
             AnyKernel3-Reno7SE-MT6877-${{
-            env.KSU_VARIANT }}-${{ env.BUILD_TIME }}
+            env.KSU_VARIANT }}-${{
+            env.BUILD_TIME }}
 
           path: kernel_workspace/AnyKernel3/*
 
@@ -759,7 +909,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: >-
-            dtbo-Reno7SE-MT6877-${{ env.BUILD_TIME }}
+            dtbo-Reno7SE-MT6877-${{
+            env.BUILD_TIME }}
 
           path: >-
             kernel_workspace/android-kernel/out/arch/${{
@@ -777,7 +928,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: >-
-            boot-Reno7SE-MT6877-${{ env.BUILD_TIME }}
+            boot-Reno7SE-MT6877-${{
+            env.BUILD_TIME }}
 
           path: kernel_workspace/boot.img
 
@@ -793,7 +945,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: >-
-            Reno7SE-MT6877-build-error-${{ github.run_number }}
+            Reno7SE-MT6877-error-${{
+            github.run_number }}
 
           if-no-files-found: ignore
 
@@ -805,11 +958,10 @@ jobs:
 
 
   # ============================================================
-  # Optional GitHub Release
+  # Optional Release
   # ============================================================
 
   release:
-
     name: Publish kernel release
 
     needs:
@@ -842,7 +994,7 @@ jobs:
 
 
           # ----------------------------------------------------
-          # AnyKernel3 ZIP
+          # Pack AnyKernel3
           # ----------------------------------------------------
 
           for dir in artifacts/AnyKernel3*/; do
@@ -865,7 +1017,7 @@ jobs:
 
 
           # ----------------------------------------------------
-          # Raw images
+          # Copy images
           # ----------------------------------------------------
 
           for file in \
@@ -877,16 +1029,16 @@ jobs:
           do
 
             if [ -f "$file" ]; then
-
               cp "$file" release/
-
             fi
 
           done
 
 
           echo
-          echo "Release files:"
+          echo "=============================================="
+          echo " Release files"
+          echo "=============================================="
 
           ls -lah release/
 
@@ -894,7 +1046,6 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8
         with:
-
           tag_name: >-
             Reno7SE-MT6877-${{
             needs.build.outputs.build_time }}
@@ -907,40 +1058,46 @@ jobs:
             ${{ needs.build.outputs.build_time }}
 
           body: |
-            ## OPPO Reno7 SE 5G Kernel
+            ## OPPO Reno7 SE 5G Custom Kernel
 
             | Item | Value |
             | --- | --- |
             | Device | OPPO Reno7 SE 5G |
             | SoC | MediaTek MT6877 |
             | Kernel | `${{ needs.build.outputs.kernel_release }}` |
-            | KernelSU | `${{ needs.build.outputs.ksu_name }}` |
-            | KernelSU Version | `${{ needs.build.outputs.ksu_version }}` |
+            | Root | `${{ needs.build.outputs.ksu_name }}` |
+            | Root Version | `${{ needs.build.outputs.ksu_version }}` |
             | SUSFS | `${{ needs.build.outputs.susfs_version || 'disabled' }}` |
 
             ### Source
 
             Kernel:
+
             `oppo-source/android_kernel_oppo_mt6877`
 
-            Vendor modules:
+            Vendor:
+
             `oppo-source/android_kernel_modules_oppo_mt6877`
 
             Branch:
+
             `oppo/mt6877_t_13.1.0_reno7_se_5g`
 
-            ### Configuration
+            ### Current configuration
 
             - Linux 4.19
-            - arm64
+            - ARM64
             - SukiSU-Ultra builtin
             - Manual hook
-            - SUSFS
             - path_umount backport
+            - SUSFS disabled
+            - KPM disabled
             - Non-GKI
 
             ### Warning
 
-            Keep a known-good original boot image before flashing.
+            This is an experimental custom kernel.
+
+            Keep the original stock boot image before flashing.
 
           files: release/*
