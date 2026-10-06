@@ -759,22 +759,22 @@ jobs:
 
 
           # ----------------------------------------------------
-          # Charger subtrees such as:
+          # Charger include inheritance
           #
-          #   adapter_ic
-          #   charger_ic
-          #   chargepump_ic
-          #   gauge_ic
-          #   vooc_ic
-          #   voocphy
-          #   ...
+          # drivers/power/oplus is a symlink to CHARGER_ROOT.
           #
-          # can indirectly include oplus_battery_mtk6877R.h.
+          # The failing object oplus_pps_ops_manager.o is built
+          # directly from charger/v1/Makefile, while many other
+          # objects are built through symlinked subdirectories.
           #
-          # The public source uses symlinked v1 subdirectories,
-          # so parent subdir-ccflags-y is not reliable enough.
-          # Add the two kernel include roots directly to EVERY
-          # real Makefile in vendor/oplus/kernel/charger.
+          # Put the include roots at THREE levels:
+          #
+          #   1. charger/Makefile       -> subdir-ccflags-y
+          #   2. charger/v1/Makefile    -> ccflags-y +
+          #                               subdir-ccflags-y
+          #   3. every charger child    -> ccflags-y
+          #
+          # This covers v1 root objects and all descendants.
           # ----------------------------------------------------
 
           python3 - "$CHARGER_ROOT" <<'PY'
@@ -783,32 +783,27 @@ jobs:
 
           root = Path(sys.argv[1])
 
-          required_lines = [
-              "ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc",
-              "ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger",
-          ]
+          tcpc = "-I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc"
+          mtk_charger = "-I$(srctree)/drivers/power/supply/mediatek/charger"
 
-          makefiles = sorted(
-              path for path in root.rglob("Makefile")
-              if path.is_file()
-          )
+          root_makefile = root / "Makefile"
+          v1_makefile = root / "v1" / "Makefile"
 
-          if not makefiles:
-              raise SystemExit(f"No charger Makefiles found under: {root}")
+          for required in (root_makefile, v1_makefile):
+              if not required.is_file():
+                  raise SystemExit(f"Missing charger Makefile: {required}")
 
-          changed_files = 0
-
-          for path in makefiles:
+          def append_lines(path: Path, lines):
               text = path.read_text()
 
               missing = [
-                  line for line in required_lines
+                  line for line in lines
                   if line not in text
               ]
 
               if not missing:
                   print(f"[SKIP] {path}")
-                  continue
+                  return False
 
               if not text.endswith("\n"):
                   text += "\n"
@@ -819,16 +814,57 @@ jobs:
                   text += line + "\n"
 
               path.write_text(text)
-              changed_files += 1
 
               print(f"[ OK ] {path}")
               for line in missing:
                   print(f"       {line}")
 
+              return True
+
+          changed = 0
+
+          # Parent Kbuild inheritance: this is the important fix
+          # for drivers/power/oplus/v1/oplus_pps_ops_manager.o.
+          changed += append_lines(
+              root_makefile,
+              [
+                  f"subdir-ccflags-y += {tcpc}",
+                  f"subdir-ccflags-y += {mtk_charger}",
+              ],
+          )
+
+          # Explicitly cover objects compiled directly in v1 and
+          # propagate again to v1's symlinked children.
+          changed += append_lines(
+              v1_makefile,
+              [
+                  f"ccflags-y += {tcpc}",
+                  f"ccflags-y += {mtk_charger}",
+                  f"subdir-ccflags-y += {tcpc}",
+                  f"subdir-ccflags-y += {mtk_charger}",
+              ],
+          )
+
+          # Belt-and-suspenders for real child Makefiles.
+          for path in sorted(root.rglob("Makefile")):
+              if not path.is_file():
+                  continue
+
+              if path in (root_makefile, v1_makefile):
+                  continue
+
+              changed += append_lines(
+                  path,
+                  [
+                      f"ccflags-y += {tcpc}",
+                      f"ccflags-y += {mtk_charger}",
+                  ],
+              )
+
           print()
           print(
-              f"Injected MT6877 kernel include paths into "
-              f"{changed_files} charger Makefile(s)."
+              f"Updated {changed} charger Makefile(s) with "
+              "MT6877 kernel include compatibility."
           )
           PY
 
@@ -854,21 +890,51 @@ jobs:
             || true
 
           echo
-          echo "Explicit chargepump_ic verification:"
+          echo "Explicit charger inheritance verification:"
 
+          CHARGER_TOP_MAKEFILE="$CHARGER_ROOT/Makefile"
+          CHARGER_V1_MAKEFILE="$CHARGER_ROOT/v1/Makefile"
           CHARGEPUMP_MAKEFILE="$CHARGER_ROOT/chargepump_ic/Makefile"
 
+          test -f "$CHARGER_TOP_MAKEFILE"
+          test -f "$CHARGER_V1_MAKEFILE"
           test -f "$CHARGEPUMP_MAKEFILE"
 
-          grep -q \
+          grep -Fq \
+            'subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc' \
+            "$CHARGER_TOP_MAKEFILE"
+
+          grep -Fq \
+            'subdir-ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger' \
+            "$CHARGER_TOP_MAKEFILE"
+
+          grep -Fq \
+            'ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc' \
+            "$CHARGER_V1_MAKEFILE"
+
+          grep -Fq \
+            'ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger' \
+            "$CHARGER_V1_MAKEFILE"
+
+          grep -Fq \
+            'subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc' \
+            "$CHARGER_V1_MAKEFILE"
+
+          grep -Fq \
+            'subdir-ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger' \
+            "$CHARGER_V1_MAKEFILE"
+
+          grep -Fq \
             'ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc' \
             "$CHARGEPUMP_MAKEFILE"
 
-          grep -q \
+          grep -Fq \
             'ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger' \
             "$CHARGEPUMP_MAKEFILE"
 
-          echo "chargepump_ic include paths: OK"
+          echo "charger root inheritance: OK"
+          echo "charger/v1 root object flags: OK"
+          echo "chargepump_ic child flags: OK"
 
           if grep -q '../../../../kernel-4.19/' "$CHARGER_HEADER"; then
             echo "::error::kernel-4.19 hardcoded include remains in MT6877 charger header"
@@ -1539,6 +1605,7 @@ jobs:
             - TFA98xx -Werror compatibility
             - MT6877 charger kernel-4.19 include normalization
             - recursive charger subtree MTK header include compatibility
+            - charger root/v1 Kbuild include inheritance for root objects
             - CONFIG_MODULE_SIG_FORCE disabled
             - stock LOCALVERSION preserved
 
