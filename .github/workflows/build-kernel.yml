@@ -1,0 +1,1666 @@
+name: Build OPPO Reno7 SE 5G Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: "Config file"
+        required: false
+        default: "config/reno7se-mt6877.env"
+        type: string
+
+      ksu_variant:
+        description: "KernelSU variant"
+        required: false
+        default: "config"
+        type: choice
+        options:
+          - config
+          - none
+          - kernelsu
+          - kernelsu-next
+          - sukisu-ultra
+          - resukisu
+          - rsuntk
+          - backslashxx
+
+      ksu_ref:
+        description: "KernelSU branch/tag/commit"
+        required: false
+        default: ""
+        type: string
+
+      hook_mode:
+        description: "KernelSU hook mode"
+        required: false
+        default: "config"
+        type: choice
+        options:
+          - config
+          - auto
+          - kprobes
+          - manual
+          - tracepoint
+          - syscall
+          - none
+
+      susfs:
+        description: "Enable SUSFS"
+        required: false
+        default: "config"
+        type: choice
+        options:
+          - config
+          - "true"
+          - "false"
+
+      path_umount:
+        description: "Enable path_umount"
+        required: false
+        default: "config"
+        type: choice
+        options:
+          - config
+          - "true"
+          - "false"
+
+      hide_stuff:
+        description: "Enable hide_stuff"
+        required: false
+        default: "config"
+        type: choice
+        options:
+          - config
+          - "true"
+          - "false"
+
+      kpm:
+        description: "Enable KPM"
+        required: false
+        default: "config"
+        type: choice
+        options:
+          - config
+          - "true"
+          - "false"
+
+      extra_defconfig:
+        description: "Extra defconfig options"
+        required: false
+        default: ""
+        type: string
+
+      publish_release:
+        description: "Publish GitHub Release"
+        required: false
+        default: false
+        type: boolean
+
+  workflow_call:
+    inputs:
+      config:
+        required: false
+        default: "config/reno7se-mt6877.env"
+        type: string
+
+      ksu_variant:
+        required: false
+        default: "config"
+        type: string
+
+      ksu_ref:
+        required: false
+        default: ""
+        type: string
+
+      hook_mode:
+        required: false
+        default: "config"
+        type: string
+
+      susfs:
+        required: false
+        default: "config"
+        type: string
+
+      path_umount:
+        required: false
+        default: "config"
+        type: string
+
+      hide_stuff:
+        required: false
+        default: "config"
+        type: string
+
+      kpm:
+        required: false
+        default: "config"
+        type: string
+
+      extra_defconfig:
+        required: false
+        default: ""
+        type: string
+
+      publish_release:
+        required: false
+        default: false
+        type: boolean
+
+
+concurrency:
+  group: reno7se-mt6877-${{ github.ref }}-${{ inputs.config }}
+  cancel-in-progress: true
+
+
+permissions:
+  contents: read
+
+
+jobs:
+  build:
+    name: Reno7 SE MT6877 · Linux 4.19.191 · ReSukiSU
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
+    outputs:
+      device: ${{ steps.meta.outputs.device }}
+      build_time: ${{ steps.meta.outputs.build_time }}
+      ksu_name: ${{ steps.meta.outputs.ksu_name }}
+      ksu_version: ${{ steps.meta.outputs.ksu_version }}
+      kernel_release: ${{ steps.meta.outputs.kernel_release }}
+      susfs_version: ${{ steps.meta.outputs.susfs_version }}
+
+    env:
+      WORKSPACE: ${{ github.workspace }}/kernel_workspace
+      CONFIG_ENV: ${{ inputs.config }}
+
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+
+      IN_KSU_VARIANT: ${{ inputs.ksu_variant }}
+      IN_KSU_REF: ${{ inputs.ksu_ref }}
+      IN_KSU_HOOK_MODE: ${{ inputs.hook_mode }}
+      IN_ENABLE_SUSFS: ${{ inputs.susfs }}
+      IN_ENABLE_PATH_UMOUNT: ${{ inputs.path_umount }}
+      IN_ENABLE_HIDE_STUFF: ${{ inputs.hide_stuff }}
+      IN_ENABLE_KPM: ${{ inputs.kpm }}
+      IN_EXTRA_DEFCONFIG: ${{ inputs.extra_defconfig }}
+
+    steps:
+      # ========================================================
+      # KernelSU_Action
+      # ========================================================
+
+      - name: Checkout KernelSU Action
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+
+      # ========================================================
+      # Resolve config
+      #
+      # scripts/config.sh writes values to $GITHUB_ENV.
+      # Those values are available only from the NEXT step.
+      # ========================================================
+
+      - name: Resolve configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/config.sh
+
+
+      - name: Show resolved configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=============================================="
+          echo " Resolved build configuration"
+          echo "=============================================="
+          echo "DEVICE=${DEVICE}"
+          echo "ARCH=${ARCH}"
+          echo "KERNEL_SOURCE=${KERNEL_SOURCE}"
+          echo "KERNEL_SOURCE_BRANCH=${KERNEL_SOURCE_BRANCH}"
+          echo "KERNEL_CONFIG=${KERNEL_CONFIG}"
+          echo "KERNEL_IMAGE_NAME=${KERNEL_IMAGE_NAME}"
+          echo "CLANG=${CLANG_BRANCH}/${CLANG_VERSION}"
+          echo "USE_LLVM=${USE_LLVM}"
+          echo "ENABLE_GCC_ARM64=${ENABLE_GCC_ARM64}"
+          echo "ENABLE_GCC_ARM32=${ENABLE_GCC_ARM32}"
+          echo "KSU_VARIANT=${KSU_VARIANT}"
+          echo "KSU_REF=${KSU_REF:-<default>}"
+          echo "KSU_HOOK_MODE=${KSU_HOOK_MODE}"
+          echo "ENABLE_SUSFS=${ENABLE_SUSFS}"
+          echo "ENABLE_PATH_UMOUNT=${ENABLE_PATH_UMOUNT}"
+          echo "ENABLE_HIDE_STUFF=${ENABLE_HIDE_STUFF}"
+          echo "ENABLE_KPM=${ENABLE_KPM}"
+          echo "CUSTOM_CMDS=${CUSTOM_CMDS:-<none>}"
+          echo "EXTRA_CMDS=${EXTRA_CMDS:-<none>}"
+          echo "EXTRA_DEFCONFIG=${EXTRA_DEFCONFIG:-<none>}"
+          echo "BUILD_TIME=${BUILD_TIME}"
+
+
+      # ========================================================
+      # Runner
+      # ========================================================
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+        with:
+          tool-cache: true
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+
+      - name: Add swap space
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f /mnt/swapfile ]; then
+            sudo fallocate -l 8G /mnt/swapfile
+            sudo chmod 600 /mnt/swapfile
+            sudo mkswap /mnt/swapfile
+          fi
+
+          sudo swapon /mnt/swapfile || true
+          free -h
+
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update -qq
+
+          sudo apt-get install \
+            -y \
+            --no-install-recommends \
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            cpio \
+            curl \
+            device-tree-compiler \
+            file \
+            flex \
+            git \
+            libelf-dev \
+            libssl-dev \
+            libncurses-dev \
+            lz4 \
+            make \
+            python3 \
+            rsync \
+            unzip \
+            zip \
+            zstd \
+            binutils-aarch64-linux-gnu \
+            binutils-arm-linux-gnueabi
+
+          mkdir -p "$WORKSPACE"
+
+
+      # ========================================================
+      # Toolchain
+      # ========================================================
+
+      - name: Set up toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/toolchain.sh
+
+
+      - name: Verify MT6877 LLVM toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          export PATH="$CLANG_PATH:$PATH"
+
+          echo "=============================================="
+          echo " MT6877 LLVM toolchain"
+          echo "=============================================="
+
+          clang --version | head -n 2
+          ld.lld --version | head -n 1
+          llvm-ar --version | head -n 1
+          llvm-nm --version | head -n 1
+          llvm-objcopy --version | head -n 1
+
+          command -v aarch64-linux-gnu-elfedit
+
+          echo
+          echo "ARM32 vdso Clang target test:"
+
+          printf 'int x;\n' \
+            | clang \
+                --target=arm-linux-gnueabi \
+                -x c \
+                -c - \
+                -o /tmp/arm32-test.o
+
+          file /tmp/arm32-test.o
+          rm -f /tmp/arm32-test.o
+
+
+      # ========================================================
+      # OPPO kernel
+      # ========================================================
+
+      - name: Fetch OPPO MT6877 kernel source
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/source.sh
+
+
+      - name: Verify Reno7 SE kernel source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -d "$KERNEL_DIR"
+
+          echo "Kernel directory:"
+          echo "  $KERNEL_DIR"
+
+          echo "Kernel version:"
+          make -s -C "$KERNEL_DIR" kernelversion
+
+          DEFCONFIG="$KERNEL_DIR/arch/arm64/configs/$KERNEL_CONFIG"
+          test -f "$DEFCONFIG"
+
+          echo "Defconfig:"
+          echo "  $DEFCONFIG"
+
+          echo "Kernel revision:"
+          git -C "$KERNEL_DIR" rev-parse HEAD
+
+
+      # ========================================================
+      # Official matching OPPO vendor/modules tree
+      # ========================================================
+
+      - name: Checkout OPPO MT6877 kernel modules
+        uses: actions/checkout@v4
+        with:
+          repository: oppo-source/android_kernel_modules_oppo_mt6877
+          ref: oppo/mt6877_t_13.1.0_reno7_se_5g
+          path: kernel_workspace/oppo-kernel-modules
+          fetch-depth: 1
+
+
+      # ========================================================
+      # Recreate OPPO external source layout
+      #
+      # Required by relative symlinks in the kernel tree:
+      #
+      #   kernel_workspace/vendor
+      #   $GITHUB_WORKSPACE/vnd/vendor
+      # ========================================================
+
+      - name: Install OPPO MT6877 vendor mappings
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MODULES_DIR="$WORKSPACE/oppo-kernel-modules"
+          WORKSPACE_VENDOR="$WORKSPACE/vendor"
+          VND_ROOT="$GITHUB_WORKSPACE/vnd"
+          VND_VENDOR="$VND_ROOT/vendor"
+
+          echo "=============================================="
+          echo " OPPO MT6877 vendor integration"
+          echo "=============================================="
+
+          if [ ! -d "$MODULES_DIR/vendor" ]; then
+            echo "::error::Missing OPPO vendor source: $MODULES_DIR/vendor"
+            exit 1
+          fi
+
+          rm -rf "$KERNEL_DIR/vendor"
+          rm -rf "$WORKSPACE_VENDOR"
+
+          mkdir -p "$VND_ROOT"
+          rm -rf "$VND_VENDOR"
+
+          ln -s "$MODULES_DIR/vendor" "$WORKSPACE_VENDOR"
+          ln -s "$MODULES_DIR/vendor" "$VND_VENDOR"
+
+          echo "kernel_workspace/vendor ->"
+          realpath "$WORKSPACE_VENDOR"
+
+          echo
+          echo "vnd/vendor ->"
+          realpath "$VND_VENDOR"
+
+          required_files=(
+            "kernel/sched_assist/Kconfig"
+            "kernel/locking/klockopt/Kconfig"
+            "drivers/base/kernelFwUpdate/Kconfig"
+          )
+
+          for file in "${required_files[@]}"; do
+            if [ ! -f "$KERNEL_DIR/$file" ]; then
+              echo "::error::Missing required OPPO source: $file"
+              exit 1
+            fi
+
+            echo "OK: $file -> $(realpath "$KERNEL_DIR/$file")"
+          done
+
+          echo
+          echo "Broken symlink report:"
+
+          find "$KERNEL_DIR" \
+            -xtype l \
+            -print \
+            2>/dev/null \
+            | tee "$WORKSPACE/broken-symlinks.txt" \
+            || true
+
+
+      # ========================================================
+      # OPPO k419 product environment
+      #
+      # The OPLUS sensor Makefile uses:
+      #
+      #   ifeq ($(findstring k419,$(TARGET_PRODUCT)),k419)
+      #
+      # to add:
+      #
+      #   -DLINUX_KERNEL_VERSION_419
+      #   -I$(srctree)/drivers/misc/mediatek/scp/include
+      #
+      # config/reno7se-mt6877.env must therefore contain:
+      #
+      # TARGET_PRODUCT=vnd_k6877v1_64_k419
+      #
+      # inside CUSTOM_CMDS.
+      # ========================================================
+
+      - name: Verify OPPO k419 build environment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=============================================="
+          echo " OPPO MT6877 k419 environment"
+          echo "=============================================="
+
+          case " ${CUSTOM_CMDS} " in
+            *" TARGET_PRODUCT=vnd_k6877v1_64_k419 "*)
+              echo "TARGET_PRODUCT=vnd_k6877v1_64_k419: OK"
+              ;;
+            *)
+              echo "::error::CUSTOM_CMDS must contain TARGET_PRODUCT=vnd_k6877v1_64_k419"
+              echo "::error::CUSTOM_CMDS=${CUSTOM_CMDS}"
+              exit 1
+              ;;
+          esac
+
+          test -f "$KERNEL_DIR/drivers/misc/mediatek/scp/include/scp.h"
+          test -f "$KERNEL_DIR/drivers/misc/mediatek/scp/rv/scp_helper.h"
+          test -f "$KERNEL_DIR/drivers/misc/mediatek/scp/rv/scp_feature_define.h"
+
+          SENSOR_MAKEFILE="$KERNEL_DIR/drivers/misc/mediatek/sensor/2.0/oplus_sensor_devinfo/Makefile"
+
+          test -f "$SENSOR_MAKEFILE"
+
+          grep -n 'findstring k419' "$SENSOR_MAKEFILE"
+          grep -n 'scp/include' "$SENSOR_MAKEFILE"
+
+
+      # ========================================================
+      # Image.gz-only build policy
+      #
+      # OPPO's published MT6877 source enables appended DTB and
+      # DT overlay image generation, but the public source tree
+      # does not contain product files such as:
+      #
+      #   oplus6877_20181/cust.dtsi
+      #
+      # We are intentionally building only Image.gz and will
+      # preserve the exact stock boot/vendor DT data when the
+      # stock boot image is repacked. Therefore disable those
+      # incomplete public-source DT image build paths.
+      # ========================================================
+
+      - name: Configure Image.gz-only build
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          EXTRA="${EXTRA_DEFCONFIG:-}"
+          EXTRA="$EXTRA CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE=n"
+          EXTRA="$EXTRA CONFIG_BUILD_ARM64_DTB_OVERLAY_IMAGE=n"
+
+          echo "EXTRA_DEFCONFIG=$EXTRA" >> "$GITHUB_ENV"
+
+          echo "=============================================="
+          echo " Image.gz-only build policy"
+          echo "=============================================="
+          echo "CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE=n"
+          echo "CONFIG_BUILD_ARM64_DTB_OVERLAY_IMAGE=n"
+          echo
+          echo "Stock DTB/DTBO data will be preserved during boot.img repack."
+
+
+      # ========================================================
+      # OPPO vendor compatibility fixes
+      #
+      # Fixes currently required by the official source release:
+      #
+      # 1. Standalone -Werror in old MTK/OPLUS vendor Makefiles.
+      #    This includes TFA98xx audio.
+      #
+      # 2. oplus_battery_mtk6877R.h contains hardcoded paths to
+      #    ../../../../kernel-4.19/... from OPPO's original full
+      #    Android source tree. Convert only the 4.19 includes to
+      #    normal Kbuild header lookup.
+      # ========================================================
+
+      - name: Apply OPPO vendor compatibility fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MODULES_DIR="$WORKSPACE/oppo-kernel-modules"
+          VENDOR_DIR="$MODULES_DIR/vendor"
+
+          test -d "$KERNEL_DIR"
+          test -d "$VENDOR_DIR"
+
+          echo "=============================================="
+          echo " OPPO / MTK vendor -Werror compatibility"
+          echo "=============================================="
+
+          python3 - "$KERNEL_DIR" "$VENDOR_DIR" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          # Replace ONLY standalone "-Werror".
+          # Preserve "-Werror=<diagnostic>".
+          pattern = re.compile(r'(?<!\S)-Werror(?=\s|$)')
+
+          changed_files = 0
+          changed_flags = 0
+
+          for raw_root in sys.argv[1:]:
+              root = Path(raw_root)
+
+              if not root.is_dir():
+                  raise SystemExit(f"Missing source root: {root}")
+
+              print(f"\nScanning: {root}")
+
+              for path in root.rglob("*"):
+                  if not path.is_file():
+                      continue
+
+                  if path.name not in ("Makefile", "Kbuild"):
+                      continue
+
+                  try:
+                      text = path.read_text()
+                  except (UnicodeDecodeError, OSError):
+                      continue
+
+                  updated, count = pattern.subn("-Wno-error", text)
+
+                  if not count:
+                      continue
+
+                  path.write_text(updated)
+
+                  changed_files += 1
+                  changed_flags += count
+
+                  print(f"[{count:2}] {path}")
+
+          print()
+          print(
+              f"Changed {changed_flags} standalone -Werror flag(s) "
+              f"in {changed_files} file(s)."
+          )
+          print("Specific -Werror=<diagnostic> flags were preserved.")
+          PY
+
+
+          # ----------------------------------------------------
+          # TFA98xx must no longer contain standalone -Werror.
+          # ----------------------------------------------------
+
+          TFA_MAKEFILE="$VENDOR_DIR/oplus/kernel_4.19/audio/tfa98xx/Makefile"
+
+          echo
+          echo "=============================================="
+          echo " TFA98xx verification"
+          echo "=============================================="
+
+          test -f "$TFA_MAKEFILE"
+
+          grep -nE 'Werror|Wno-error' "$TFA_MAKEFILE" || true
+
+          if grep -Eq \
+            '(^|[[:space:]])-Werror([[:space:]]|$)' \
+            "$TFA_MAKEFILE"
+          then
+            echo "::error::TFA98xx still contains standalone -Werror"
+            exit 1
+          fi
+
+
+          # ----------------------------------------------------
+          # OPPO MT6877 charger hardcoded kernel-4.19 includes.
+          # ----------------------------------------------------
+
+          CHARGER_ROOT="$VENDOR_DIR/oplus/kernel/charger"
+          CHARGER_HEADER="$CHARGER_ROOT/charger_ic/oplus_battery_mtk6877R.h"
+
+          echo
+          echo "=============================================="
+          echo " MT6877 charger include compatibility"
+          echo "=============================================="
+
+          test -d "$CHARGER_ROOT"
+          test -f "$CHARGER_HEADER"
+
+          required_headers=(
+            "drivers/misc/mediatek/typec/tcpc/inc/tcpm.h"
+            "drivers/misc/mediatek/typec/tcpc/inc/mtk_direct_charge_vdm.h"
+            "drivers/power/supply/mediatek/charger/mtk_pe_intf.h"
+            "drivers/power/supply/mediatek/charger/mtk_pe20_intf.h"
+            "drivers/power/supply/mediatek/charger/mtk_pdc_intf.h"
+            "drivers/power/supply/mediatek/charger/mtk_charger_init.h"
+            "drivers/power/supply/mediatek/charger/mtk_charger_intf.h"
+          )
+
+          for header in "${required_headers[@]}"; do
+            if [ ! -f "$KERNEL_DIR/$header" ]; then
+              echo "::error::Required charger header missing: $header"
+              exit 1
+            fi
+
+            echo "OK: $header"
+          done
+
+
+          # ----------------------------------------------------
+          # The released OPLUS header assumes the original full
+          # Android source layout and hardcodes kernel-4.19 paths.
+          # Normalize only the active Linux 4.19 branch.
+          # ----------------------------------------------------
+
+          python3 - "$CHARGER_HEADER" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          text = path.read_text()
+
+          replacements = {
+              '#include "../../../../kernel-4.19/drivers/misc/mediatek/typec/tcpc/inc/tcpm.h"':
+              '#include "tcpm.h"',
+
+              '#include "../../../../kernel-4.19/drivers/misc/mediatek/typec/tcpc/inc/mtk_direct_charge_vdm.h"':
+              '#include "mtk_direct_charge_vdm.h"',
+
+              '#include "../../../../kernel-4.19/drivers/power/supply/mediatek/charger/mtk_pe_intf.h"':
+              '#include "mtk_pe_intf.h"',
+
+              '#include "../../../../kernel-4.19/drivers/power/supply/mediatek/charger/mtk_pe20_intf.h"':
+              '#include "mtk_pe20_intf.h"',
+
+              '#include "../../../../kernel-4.19/drivers/power/supply/mediatek/charger/mtk_pdc_intf.h"':
+              '#include "mtk_pdc_intf.h"',
+
+              '#include "../../../../kernel-4.19/drivers/power/supply/mediatek/charger/mtk_charger_init.h"':
+              '#include "mtk_charger_init.h"',
+
+              '#include "../../../../kernel-4.19/drivers/power/supply/mediatek/charger/mtk_charger_intf.h"':
+              '#include "mtk_charger_intf.h"',
+          }
+
+          changed = 0
+
+          for old, new in replacements.items():
+              if old in text:
+                  text = text.replace(old, new)
+                  changed += 1
+                  print(f"[ OK ] {new}")
+              elif new in text:
+                  print(f"[SKIP] already fixed: {new}")
+              else:
+                  raise SystemExit(
+                      "Expected MT6877 Linux 4.19 charger include not found:\n"
+                      + old
+                  )
+
+          path.write_text(text)
+
+          print()
+          print(f"Changed {changed} hardcoded Linux 4.19 include(s).")
+          PY
+
+
+          # ----------------------------------------------------
+          # Charger include inheritance
+          #
+          # drivers/power/oplus is a symlink to CHARGER_ROOT.
+          #
+          # The failing object oplus_pps_ops_manager.o is built
+          # directly from charger/v1/Makefile, while many other
+          # objects are built through symlinked subdirectories.
+          #
+          # Put the include roots at THREE levels:
+          #
+          #   1. charger/Makefile       -> subdir-ccflags-y
+          #   2. charger/v1/Makefile    -> ccflags-y +
+          #                               subdir-ccflags-y
+          #   3. every charger child    -> ccflags-y
+          #
+          # This covers v1 root objects and all descendants.
+          # ----------------------------------------------------
+
+          python3 - "$CHARGER_ROOT" <<'PY'
+          from pathlib import Path
+          import sys
+
+          root = Path(sys.argv[1])
+
+          tcpc = "-I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc"
+          mtk_charger = "-I$(srctree)/drivers/power/supply/mediatek/charger"
+
+          root_makefile = root / "Makefile"
+          v1_makefile = root / "v1" / "Makefile"
+
+          for required in (root_makefile, v1_makefile):
+              if not required.is_file():
+                  raise SystemExit(f"Missing charger Makefile: {required}")
+
+          def append_lines(path: Path, lines):
+              text = path.read_text()
+
+              missing = [
+                  line for line in lines
+                  if line not in text
+              ]
+
+              if not missing:
+                  print(f"[SKIP] {path}")
+                  return False
+
+              if not text.endswith("\n"):
+                  text += "\n"
+
+              text += "\n# OPPO MT6877 kernel header compatibility\n"
+
+              for line in missing:
+                  text += line + "\n"
+
+              path.write_text(text)
+
+              print(f"[ OK ] {path}")
+              for line in missing:
+                  print(f"       {line}")
+
+              return True
+
+          changed = 0
+
+          # Parent Kbuild inheritance: this is the important fix
+          # for drivers/power/oplus/v1/oplus_pps_ops_manager.o.
+          changed += append_lines(
+              root_makefile,
+              [
+                  f"subdir-ccflags-y += {tcpc}",
+                  f"subdir-ccflags-y += {mtk_charger}",
+              ],
+          )
+
+          # Explicitly cover objects compiled directly in v1 and
+          # propagate again to v1's symlinked children.
+          changed += append_lines(
+              v1_makefile,
+              [
+                  f"ccflags-y += {tcpc}",
+                  f"ccflags-y += {mtk_charger}",
+                  f"subdir-ccflags-y += {tcpc}",
+                  f"subdir-ccflags-y += {mtk_charger}",
+              ],
+          )
+
+          # Belt-and-suspenders for real child Makefiles.
+          for path in sorted(root.rglob("Makefile")):
+              if not path.is_file():
+                  continue
+
+              if path in (root_makefile, v1_makefile):
+                  continue
+
+              changed += append_lines(
+                  path,
+                  [
+                      f"ccflags-y += {tcpc}",
+                      f"ccflags-y += {mtk_charger}",
+                  ],
+              )
+
+          print()
+          print(
+              f"Updated {changed} charger Makefile(s) with "
+              "MT6877 kernel include compatibility."
+          )
+          PY
+
+
+          echo
+          echo "4.19 charger includes after normalization:"
+
+          grep \
+            -nE \
+            'tcpm\.h|mtk_direct_charge_vdm|mtk_pe_intf|mtk_pe20_intf|mtk_pdc_intf|mtk_charger_init|mtk_charger_intf' \
+            "$CHARGER_HEADER"
+
+          echo
+          echo "All charger Makefiles containing MT6877 compatibility paths:"
+
+          grep \
+            -R \
+            --include='Makefile' \
+            -nE \
+            'typec/tcpc/inc|power/supply/mediatek/charger' \
+            "$CHARGER_ROOT" \
+            | head -n 200 \
+            || true
+
+          echo
+          echo "Explicit charger inheritance verification:"
+
+          CHARGER_TOP_MAKEFILE="$CHARGER_ROOT/Makefile"
+          CHARGER_V1_MAKEFILE="$CHARGER_ROOT/v1/Makefile"
+          CHARGEPUMP_MAKEFILE="$CHARGER_ROOT/chargepump_ic/Makefile"
+
+          test -f "$CHARGER_TOP_MAKEFILE"
+          test -f "$CHARGER_V1_MAKEFILE"
+          test -f "$CHARGEPUMP_MAKEFILE"
+
+          grep -Fq \
+            'subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc' \
+            "$CHARGER_TOP_MAKEFILE"
+
+          grep -Fq \
+            'subdir-ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger' \
+            "$CHARGER_TOP_MAKEFILE"
+
+          grep -Fq \
+            'ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc' \
+            "$CHARGER_V1_MAKEFILE"
+
+          grep -Fq \
+            'ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger' \
+            "$CHARGER_V1_MAKEFILE"
+
+          grep -Fq \
+            'subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc' \
+            "$CHARGER_V1_MAKEFILE"
+
+          grep -Fq \
+            'subdir-ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger' \
+            "$CHARGER_V1_MAKEFILE"
+
+          grep -Fq \
+            'ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc' \
+            "$CHARGEPUMP_MAKEFILE"
+
+          grep -Fq \
+            'ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger' \
+            "$CHARGEPUMP_MAKEFILE"
+
+          echo "charger root inheritance: OK"
+          echo "charger/v1 root object flags: OK"
+          echo "chargepump_ic child flags: OK"
+
+          if grep -q '../../../../kernel-4.19/' "$CHARGER_HEADER"; then
+            echo "::error::kernel-4.19 hardcoded include remains in MT6877 charger header"
+            exit 1
+          fi
+
+          echo
+          echo "OPPO vendor compatibility fixes ready."
+
+
+      # ========================================================
+      # ReSukiSU
+      # ========================================================
+
+      - name: Install KernelSU variant
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$KSU_VARIANT" = "none" ]; then
+            echo "KernelSU disabled."
+            exit 0
+          fi
+
+          bash scripts/kernelsu.sh
+
+
+      - name: Show ReSukiSU information
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$KSU_VARIANT" != "resukisu" ]; then
+            echo "Not a ReSukiSU build; skipping."
+            exit 0
+          fi
+
+          echo "=============================================="
+          echo " ReSukiSU"
+          echo "=============================================="
+
+          echo "KSU_NAME=${KSU_NAME:-}"
+          echo "KSU_REF_RESOLVED=${KSU_REF_RESOLVED:-}"
+          echo "KSU_VERSION_LABEL=${KSU_VERSION_LABEL:-}"
+          echo "KSU_COMMIT_COUNT=${KSU_COMMIT_COUNT:-}"
+          echo "KSU_HOOK_MODE_RESOLVED=${KSU_HOOK_MODE_RESOLVED:-}"
+
+          test -d "$KERNEL_DIR/KernelSU"
+
+          git \
+            -C "$KERNEL_DIR/KernelSU" \
+            log \
+            -1 \
+            --oneline
+
+
+      # ========================================================
+      # OPPO MT6877 ReSukiSU manual hooks
+      #
+      # Uses the official ReSukiSU kernel-4.19 patch for
+      # fs/exec.c, fs/open.c and fs/stat.c.
+      #
+      # kernel/reboot.c has OPPO-specific context and is handled
+      # separately.
+      # ========================================================
+
+      - name: Apply Reno7 SE ReSukiSU 4.19 hooks
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$KSU_VARIANT" != "resukisu" ]; then
+            echo "Not a ReSukiSU build; skipping."
+            exit 0
+          fi
+
+          PATCH_DIR="$WORKSPACE/ReSukiSU_Patches"
+          PATCH_FILE="$PATCH_DIR/scope-minimized/kernel-4.19.patch"
+
+          if [ ! -d "$PATCH_DIR/.git" ]; then
+            rm -rf "$PATCH_DIR"
+
+            git clone \
+              --depth=1 \
+              https://github.com/ReSukiSU/ReSukiSU_Patches.git \
+              "$PATCH_DIR"
+          fi
+
+          test -f "$PATCH_FILE"
+
+          cd "$KERNEL_DIR"
+
+          PATCH_ARGS=(
+            "--include=fs/exec.c"
+            "--include=fs/open.c"
+            "--include=fs/stat.c"
+          )
+
+          echo "=============================================="
+          echo " ReSukiSU official Linux 4.19 fs hooks"
+          echo "=============================================="
+
+          if git apply \
+            --check \
+            "${PATCH_ARGS[@]}" \
+            "$PATCH_FILE"
+          then
+            git apply \
+              "${PATCH_ARGS[@]}" \
+              "$PATCH_FILE"
+
+          elif git apply \
+            --reverse \
+            --check \
+            "${PATCH_ARGS[@]}" \
+            "$PATCH_FILE"
+          then
+            echo "FS hooks already applied."
+
+          else
+            echo "::error::Official ReSukiSU Linux 4.19 fs hooks do not apply."
+            git apply \
+              --check \
+              --verbose \
+              "${PATCH_ARGS[@]}" \
+              "$PATCH_FILE" \
+              || true
+
+            exit 1
+          fi
+
+
+          echo
+          echo "=============================================="
+          echo " OPPO MT6877 reboot hook"
+          echo "=============================================="
+
+          python3 - "$KERNEL_DIR" <<'PY'
+          from pathlib import Path
+          import sys
+
+          kernel = Path(sys.argv[1])
+          path = kernel / "kernel/reboot.c"
+
+          if not path.is_file():
+              raise SystemExit("kernel/reboot.c does not exist")
+
+          text = path.read_text()
+
+          syscall_marker = (
+              "SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,\n"
+              "\t\tvoid __user *, arg)"
+          )
+
+          if "extern int ksu_handle_sys_reboot" not in text:
+              if syscall_marker not in text:
+                  raise SystemExit(
+                      "MT6877 reboot syscall declaration not found"
+                  )
+
+              declaration = """#ifdef CONFIG_KSU_MANUAL_HOOK
+          extern int ksu_handle_sys_reboot(
+          \tint magic1,
+          \tint magic2,
+          \tunsigned int cmd,
+          \tvoid __user **arg);
+          #endif
+
+          """
+
+              text = text.replace(
+                  syscall_marker,
+                  declaration + syscall_marker,
+                  1
+              )
+
+          if text.count("ksu_handle_sys_reboot(") < 2:
+              syscall_start = text.find("SYSCALL_DEFINE4(reboot")
+
+              if syscall_start < 0:
+                  raise SystemExit("reboot syscall not found")
+
+              ret_marker = "\tint ret = 0;\n"
+              ret_pos = text.find(ret_marker, syscall_start)
+
+              if ret_pos < 0:
+                  raise SystemExit(
+                      "reboot syscall ret initialization not found"
+                  )
+
+              insert_pos = ret_pos + len(ret_marker)
+
+              invocation = """
+          #ifdef CONFIG_KSU_MANUAL_HOOK
+          \tksu_handle_sys_reboot(
+          \t\tmagic1,
+          \t\tmagic2,
+          \t\tcmd,
+          \t\t&arg);
+          #endif
+          """
+
+              text = (
+                  text[:insert_pos]
+                  + invocation
+                  + text[insert_pos:]
+              )
+
+          path.write_text(text)
+
+          verify = path.read_text()
+
+          if verify.count("ksu_handle_sys_reboot(") < 2:
+              raise SystemExit("reboot hook verification failed")
+          PY
+
+
+          echo
+          echo "=============================================="
+          echo " ReSukiSU hook verification"
+          echo "=============================================="
+
+          grep -q "ksu_handle_execveat" fs/exec.c
+          grep -q "ksu_handle_faccessat" fs/open.c
+          grep -q "ksu_handle_stat" fs/stat.c
+          grep -q "ksu_handle_newfstat_ret" fs/stat.c
+          grep -q "ksu_handle_fstat64_ret" fs/stat.c
+          grep -q "ksu_handle_sys_reboot" kernel/reboot.c
+
+          git diff --check
+
+
+      # ========================================================
+      # Remaining patches
+      #
+      # Our OPPO step has already installed manual syscall hooks,
+      # so disable only the generic hook application in
+      # scripts/patches.sh. path_umount remains enabled.
+      # ========================================================
+
+      - name: Apply remaining kernel patches
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$KSU_VARIANT" = "resukisu" ]; then
+            KSU_HOOK_MODE_RESOLVED=none \
+              bash scripts/patches.sh all
+          else
+            bash scripts/patches.sh all
+          fi
+
+
+      - name: Verify ReSukiSU integration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$KSU_VARIANT" != "resukisu" ]; then
+            echo "Not a ReSukiSU build; skipping."
+            exit 0
+          fi
+
+          test -d "$KERNEL_DIR/KernelSU"
+
+          grep -q "ksu_handle_execveat" "$KERNEL_DIR/fs/exec.c"
+          grep -q "ksu_handle_faccessat" "$KERNEL_DIR/fs/open.c"
+          grep -q "ksu_handle_stat" "$KERNEL_DIR/fs/stat.c"
+          grep -q "ksu_handle_newfstat_ret" "$KERNEL_DIR/fs/stat.c"
+          grep -q "ksu_handle_fstat64_ret" "$KERNEL_DIR/fs/stat.c"
+          grep -q "ksu_handle_sys_reboot" "$KERNEL_DIR/kernel/reboot.c"
+
+          if [ "$ENABLE_PATH_UMOUNT" = "true" ]; then
+            grep -q "^int path_umount" "$KERNEL_DIR/fs/namespace.c"
+          fi
+
+          echo "ReSukiSU source integration: OK"
+
+
+      - name: Show source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=============================================="
+          echo " Kernel tree diff"
+          echo "=============================================="
+
+          cd "$KERNEL_DIR"
+
+          git diff --stat || true
+          git diff --check
+
+          echo
+          echo "=============================================="
+          echo " Vendor changed Makefiles / charger header"
+          echo "=============================================="
+
+          MODULES_DIR="$WORKSPACE/oppo-kernel-modules"
+
+          git \
+            -C "$MODULES_DIR" \
+            diff \
+            --stat \
+            || true
+
+
+      # ========================================================
+      # ccache
+      # ========================================================
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: Reno7SE-MT6877-4.19-ReSukiSU-r450784e
+          max-size: 2G
+
+
+      # ========================================================
+      # Build
+      #
+      # Phase 1:
+      #   normal parallel KernelSU_Action build
+      #
+      # If it fails:
+      #   print real compiler/linker errors immediately.
+      #
+      # The full log is always uploaded later.
+      # ========================================================
+
+      - name: Build kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          LOG="$WORKSPACE/build.log"
+
+          echo "=============================================="
+          echo " OPPO Reno7 SE 5G"
+          echo " MT6877"
+          echo " Linux 4.19.191"
+          echo " ReSukiSU"
+          echo "=============================================="
+
+          # KernelSU_Action/source.sh exports LOCALVERSION="".
+          # On this OPPO 4.19 tree that suppresses the stock "+" suffix.
+          #
+          # Stock Reno7 SE kernel release:
+          #   4.19.191+
+          #
+          # Remove LOCALVERSION from the child build environment so
+          # scripts/setlocalversion can restore the stock suffix.
+          unset LOCALVERSION
+
+          echo "LOCALVERSION is intentionally unset for stock UTS_RELEASE compatibility."
+
+          set +e
+
+          env -u LOCALVERSION \
+            bash scripts/build.sh all \
+            2>&1 \
+            | tee "$LOG"
+
+          STATUS=${PIPESTATUS[0]}
+
+          set -e
+
+          if [ "$STATUS" -eq 0 ]; then
+            echo
+            echo "Kernel build successful."
+            exit 0
+          fi
+
+          echo
+          echo "::error::Kernel build failed with status $STATUS"
+
+          echo
+          echo "=============================================="
+          echo " First real compiler / linker errors"
+          echo "=============================================="
+
+          grep \
+            -nEi \
+            'fatal error:|error:|ld\.lld: error:|undefined reference|undefined symbol|No such file or directory|multiple definition|relocation.*failed' \
+            "$LOG" \
+            | head -n 200 \
+            || true
+
+          echo
+          echo "=============================================="
+          echo " Make failures"
+          echo "=============================================="
+
+          grep \
+            -nE \
+            'make(\[[0-9]+\])?: \*\*\*' \
+            "$LOG" \
+            | head -n 160 \
+            || true
+
+          echo
+          echo "=============================================="
+          echo " Last 400 build log lines"
+          echo "=============================================="
+
+          tail -n 400 "$LOG" || true
+
+          exit "$STATUS"
+
+
+      # ========================================================
+      # Final config
+      # ========================================================
+
+      - name: Verify final kernel config
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CONFIG="$KERNEL_DIR/out/.config"
+
+          test -f "$CONFIG"
+
+          echo "=============================================="
+          echo " Final kernel configuration"
+          echo "=============================================="
+
+          grep -E '^CONFIG_KSU(=|_)' "$CONFIG" || true
+          grep -E '^CONFIG_KALLSYMS' "$CONFIG" || true
+          grep -E '^CONFIG_MODULE_SIG|^# CONFIG_MODULE_SIG_FORCE' "$CONFIG" || true
+          grep -E '^CONFIG_OVERLAY_FS=' "$CONFIG" || true
+          grep -E 'CONFIG_(LTO|CFI)' "$CONFIG" || true
+
+          if [ "$KSU_VARIANT" = "resukisu" ]; then
+            grep -q '^CONFIG_KSU=y' "$CONFIG"
+            grep -q '^CONFIG_KSU_MANUAL_HOOK=y' "$CONFIG"
+            grep -q '^CONFIG_KALLSYMS=y' "$CONFIG"
+            grep -q '^CONFIG_KALLSYMS_ALL=y' "$CONFIG"
+          fi
+
+          if grep -q '^CONFIG_MODULE_SIG_FORCE=y' "$CONFIG"; then
+            echo "::error::CONFIG_MODULE_SIG_FORCE is still enabled."
+            exit 1
+          fi
+
+          if grep -q '^CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE=y' "$CONFIG"; then
+            echo "::error::APPENDED_DTB build is still enabled."
+            exit 1
+          fi
+
+          if grep -q '^CONFIG_BUILD_ARM64_DTB_OVERLAY_IMAGE=y' "$CONFIG"; then
+            echo "::error::DTB overlay image build is still enabled."
+            exit 1
+          fi
+
+          UTS_FILE="$KERNEL_DIR/out/include/generated/utsrelease.h"
+
+          if [ ! -f "$UTS_FILE" ]; then
+            echo "::error::Missing generated utsrelease.h"
+            exit 1
+          fi
+
+          UTS_RELEASE=$(
+            sed -n 's/^#define UTS_RELEASE "\(.*\)"/\1/p' "$UTS_FILE"
+          )
+
+          echo
+          echo "Generated UTS_RELEASE=${UTS_RELEASE}"
+
+          if [ "$UTS_RELEASE" != "4.19.191+" ]; then
+            echo "::error::Unexpected UTS_RELEASE: ${UTS_RELEASE}"
+            echo "::error::Expected stock-compatible release: 4.19.191+"
+            exit 1
+          fi
+
+          echo "Stock-compatible UTS_RELEASE verified: 4.19.191+"
+
+
+      # ========================================================
+      # Image
+      # ========================================================
+
+      - name: Verify kernel Image.gz
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE="$KERNEL_DIR/out/arch/arm64/boot/Image.gz"
+
+          if [ ! -s "$IMAGE" ]; then
+            echo "::error::Image.gz not found: $IMAGE"
+
+            ls -lah \
+              "$KERNEL_DIR/out/arch/arm64/boot" \
+              || true
+
+            exit 1
+          fi
+
+          echo "=============================================="
+          echo " Kernel Image.gz"
+          echo "=============================================="
+
+          file "$IMAGE"
+          ls -lh "$IMAGE"
+          sha256sum "$IMAGE"
+
+          if [ -f "$KERNEL_DIR/out/include/generated/utsrelease.h" ]; then
+            echo
+            cat "$KERNEL_DIR/out/include/generated/utsrelease.h"
+          fi
+
+          echo
+          echo "Embedded Linux version strings:"
+          gzip -dc "$IMAGE" \
+            | strings \
+            | grep -m 3 -E '^Linux version 4\.19\.191\+' \
+            || {
+              echo "::error::Image.gz does not contain Linux version 4.19.191+"
+              exit 1
+            }
+
+
+      # ========================================================
+      # Package
+      # ========================================================
+
+      - name: Package artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/package.sh all
+
+
+      - name: Export build metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          {
+            echo "device=${DEVICE}"
+            echo "build_time=${BUILD_TIME}"
+            echo "ksu_name=${KSU_NAME:-none}"
+            echo "ksu_version=${KSU_VERSION_LABEL:-}"
+            echo "kernel_release=${KERNEL_RELEASE:-}"
+            echo "susfs_version=${SUSFS_VERSION:-disabled}"
+          } >> "$GITHUB_OUTPUT"
+
+
+      # ========================================================
+      # Artifacts
+      # ========================================================
+
+      - name: Upload kernel Image.gz
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image.gz-ReSukiSU-Reno7SE-MT6877-${{ github.run_number }}
+          path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
+          if-no-files-found: error
+          compression-level: 0
+
+
+      - name: Upload AnyKernel3
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnyKernel3-ReSukiSU-Reno7SE-MT6877-${{ github.run_number }}
+          path: kernel_workspace/AnyKernel3/*
+          if-no-files-found: ignore
+
+
+      - name: Upload DTBO if present
+        uses: actions/upload-artifact@v4
+        with:
+          name: DTBO-Reno7SE-MT6877-${{ github.run_number }}
+          path: kernel_workspace/android-kernel/out/arch/arm64/boot/dtbo.img
+          if-no-files-found: ignore
+
+
+      - name: Upload boot image if present
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-ReSukiSU-Reno7SE-MT6877-${{ github.run_number }}
+          path: kernel_workspace/boot.img
+          if-no-files-found: ignore
+
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BuildLog-Reno7SE-MT6877-${{ github.run_number }}
+          path: kernel_workspace/build.log
+          if-no-files-found: ignore
+
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Reno7SE-MT6877-error-${{ github.run_number }}
+          if-no-files-found: ignore
+          path: |
+            kernel_workspace/build.log
+            kernel_workspace/broken-symlinks.txt
+            kernel_workspace/android-kernel/out/.config
+            kernel_workspace/android-kernel/out/include/generated/autoconf.h
+            kernel_workspace/android-kernel/out/include/generated/utsrelease.h
+            kernel_workspace/android-kernel/arch/arm64/configs/k6877v1_64_k419_defconfig
+
+
+  # ============================================================
+  # Optional GitHub Release
+  # ============================================================
+
+  release:
+    name: Publish Reno7 SE Kernel Release
+
+    needs:
+      - build
+
+    if: inputs.publish_release
+
+    runs-on: ubuntu-22.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: false
+
+
+      - name: Prepare release files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p release
+          shopt -s nullglob
+
+          for dir in artifacts/AnyKernel3*/; do
+            name=$(basename "${dir%/}")
+
+            (
+              cd "$dir"
+
+              zip \
+                -qr9 \
+                "${GITHUB_WORKSPACE}/release/${name}.zip" \
+                .
+            )
+          done
+
+          for file in \
+            artifacts/*/Image \
+            artifacts/*/Image.gz \
+            artifacts/*/Image.gz-dtb \
+            artifacts/*/boot.img \
+            artifacts/*/dtbo.img
+          do
+            if [ -f "$file" ]; then
+              cp "$file" release/
+            fi
+          done
+
+          ls -lah release/
+
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8
+        with:
+          tag_name: Reno7SE-MT6877-${{ needs.build.outputs.build_time }}
+
+          name: >-
+            Reno7 SE 5G · ReSukiSU · Linux 4.19.191 ·
+            ${{ needs.build.outputs.build_time }}
+
+          body: |
+            ## OPPO Reno7 SE 5G Custom Kernel
+
+            | Item | Value |
+            | --- | --- |
+            | Device | OPPO Reno7 SE 5G |
+            | SoC | MediaTek MT6877 |
+            | Kernel | `${{ needs.build.outputs.kernel_release }}` |
+            | Root | `${{ needs.build.outputs.ksu_name }}` |
+            | Root Version | `${{ needs.build.outputs.ksu_version }}` |
+            | SUSFS | disabled |
+
+            ### Source
+
+            Kernel:
+            `oppo-source/android_kernel_oppo_mt6877`
+
+            Branch:
+            `oppo/mt6877_t_13.1.0_reno7_se_5g`
+
+            Vendor/modules:
+            `oppo-source/android_kernel_modules_oppo_mt6877`
+
+            ### Integration
+
+            - ReSukiSU
+            - manual syscall hooks
+            - path_umount
+            - TARGET_PRODUCT=vnd_k6877v1_64_k419
+            - stock-compatible UTS_RELEASE=4.19.191+
+            - OPLUS sensor/SCP Linux 4.19 environment
+            - OPPO/MTK standalone -Werror compatibility
+            - TFA98xx -Werror compatibility
+            - MT6877 charger kernel-4.19 include normalization
+            - recursive charger subtree MTK header include compatibility
+            - charger root/v1 Kbuild include inheritance for root objects
+            - CONFIG_MODULE_SIG_FORCE disabled
+            - stock LOCALVERSION preserved
+
+            ### Flashing
+
+            For the first device test, prefer repacking the exact stock
+            boot.img from the currently installed ColorOS build and
+            replacing only its kernel.
+
+            Keep the original stock boot.img before testing.
+
+          files: release/*
