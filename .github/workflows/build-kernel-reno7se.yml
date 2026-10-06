@@ -669,18 +669,16 @@ jobs:
           # OPPO MT6877 charger hardcoded kernel-4.19 includes.
           # ----------------------------------------------------
 
-          CHARGER_HEADER="$VENDOR_DIR/oplus/kernel/charger/charger_ic/oplus_battery_mtk6877R.h"
-          CHARGER_ADAPTER_MAKEFILE="$VENDOR_DIR/oplus/kernel/charger/adapter_ic/Makefile"
-          CHARGER_IC_MAKEFILE="$VENDOR_DIR/oplus/kernel/charger/charger_ic/Makefile"
+          CHARGER_ROOT="$VENDOR_DIR/oplus/kernel/charger"
+          CHARGER_HEADER="$CHARGER_ROOT/charger_ic/oplus_battery_mtk6877R.h"
 
           echo
           echo "=============================================="
           echo " MT6877 charger include compatibility"
           echo "=============================================="
 
+          test -d "$CHARGER_ROOT"
           test -f "$CHARGER_HEADER"
-          test -f "$CHARGER_ADAPTER_MAKEFILE"
-          test -f "$CHARGER_IC_MAKEFILE"
 
           required_headers=(
             "drivers/misc/mediatek/typec/tcpc/inc/tcpm.h"
@@ -701,6 +699,12 @@ jobs:
             echo "OK: $header"
           done
 
+
+          # ----------------------------------------------------
+          # The released OPLUS header assumes the original full
+          # Android source layout and hardcodes kernel-4.19 paths.
+          # Normalize only the active Linux 4.19 branch.
+          # ----------------------------------------------------
 
           python3 - "$CHARGER_HEADER" <<'PY'
           from pathlib import Path
@@ -743,7 +747,7 @@ jobs:
                   print(f"[SKIP] already fixed: {new}")
               else:
                   raise SystemExit(
-                      "Expected MT6877 4.19 charger include not found:\n"
+                      "Expected MT6877 Linux 4.19 charger include not found:\n"
                       + old
                   )
 
@@ -755,29 +759,46 @@ jobs:
 
 
           # ----------------------------------------------------
-          # Put the include paths directly into the actual child
-          # Makefiles that compile adapter_ic and charger_ic.
+          # Charger subtrees such as:
           #
-          # This is deliberate: charger/v1 contains symlinks such
-          # as adapter_ic -> ../adapter_ic. Parent
-          # subdir-ccflags-y is not reliable enough across that
-          # released vendor symlink layout. ccflags-y in the child
-          # Makefiles is deterministic for the affected objects.
+          #   adapter_ic
+          #   charger_ic
+          #   chargepump_ic
+          #   gauge_ic
+          #   vooc_ic
+          #   voocphy
+          #   ...
+          #
+          # can indirectly include oplus_battery_mtk6877R.h.
+          #
+          # The public source uses symlinked v1 subdirectories,
+          # so parent subdir-ccflags-y is not reliable enough.
+          # Add the two kernel include roots directly to EVERY
+          # real Makefile in vendor/oplus/kernel/charger.
           # ----------------------------------------------------
 
-          python3 - \
-            "$CHARGER_ADAPTER_MAKEFILE" \
-            "$CHARGER_IC_MAKEFILE" <<'PY'
+          python3 - "$CHARGER_ROOT" <<'PY'
           from pathlib import Path
           import sys
+
+          root = Path(sys.argv[1])
 
           required_lines = [
               "ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc",
               "ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger",
           ]
 
-          for raw in sys.argv[1:]:
-              path = Path(raw)
+          makefiles = sorted(
+              path for path in root.rglob("Makefile")
+              if path.is_file()
+          )
+
+          if not makefiles:
+              raise SystemExit(f"No charger Makefiles found under: {root}")
+
+          changed_files = 0
+
+          for path in makefiles:
               text = path.read_text()
 
               missing = [
@@ -785,19 +806,30 @@ jobs:
                   if line not in text
               ]
 
-              if missing:
-                  if not text.endswith("\n"):
-                      text += "\n"
+              if not missing:
+                  print(f"[SKIP] {path}")
+                  continue
 
-                  text += "\n# OPPO MT6877 kernel header compatibility\n"
+              if not text.endswith("\n"):
+                  text += "\n"
 
-                  for line in missing:
-                      text += line + "\n"
-                      print(f"[ OK ] {path}: {line}")
+              text += "\n# OPPO MT6877 kernel header compatibility\n"
 
-                  path.write_text(text)
-              else:
-                  print(f"[SKIP] include paths already present: {path}")
+              for line in missing:
+                  text += line + "\n"
+
+              path.write_text(text)
+              changed_files += 1
+
+              print(f"[ OK ] {path}")
+              for line in missing:
+                  print(f"       {line}")
+
+          print()
+          print(
+              f"Injected MT6877 kernel include paths into "
+              f"{changed_files} charger Makefile(s)."
+          )
           PY
 
 
@@ -810,20 +842,33 @@ jobs:
             "$CHARGER_HEADER"
 
           echo
-          echo "adapter_ic include paths:"
+          echo "All charger Makefiles containing MT6877 compatibility paths:"
 
           grep \
+            -R \
+            --include='Makefile' \
             -nE \
             'typec/tcpc/inc|power/supply/mediatek/charger' \
-            "$CHARGER_ADAPTER_MAKEFILE"
+            "$CHARGER_ROOT" \
+            | head -n 200 \
+            || true
 
           echo
-          echo "charger_ic include paths:"
+          echo "Explicit chargepump_ic verification:"
 
-          grep \
-            -nE \
-            'typec/tcpc/inc|power/supply/mediatek/charger' \
-            "$CHARGER_IC_MAKEFILE"
+          CHARGEPUMP_MAKEFILE="$CHARGER_ROOT/chargepump_ic/Makefile"
+
+          test -f "$CHARGEPUMP_MAKEFILE"
+
+          grep -q \
+            'ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc' \
+            "$CHARGEPUMP_MAKEFILE"
+
+          grep -q \
+            'ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger' \
+            "$CHARGEPUMP_MAKEFILE"
+
+          echo "chargepump_ic include paths: OK"
 
           if grep -q '../../../../kernel-4.19/' "$CHARGER_HEADER"; then
             echo "::error::kernel-4.19 hardcoded include remains in MT6877 charger header"
@@ -1493,6 +1538,7 @@ jobs:
             - OPPO/MTK standalone -Werror compatibility
             - TFA98xx -Werror compatibility
             - MT6877 charger kernel-4.19 include normalization
+            - recursive charger subtree MTK header include compatibility
             - CONFIG_MODULE_SIG_FORCE disabled
             - stock LOCALVERSION preserved
 
