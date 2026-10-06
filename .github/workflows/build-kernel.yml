@@ -96,7 +96,6 @@ on:
         default: false
         type: boolean
 
-
   workflow_call:
     inputs:
       config:
@@ -151,7 +150,7 @@ on:
 
 
 concurrency:
-  group: reno7se-${{ github.ref }}-${{ inputs.config }}
+  group: reno7se-mt6877-${{ github.ref }}-${{ inputs.config }}
   cancel-in-progress: true
 
 
@@ -160,15 +159,12 @@ permissions:
 
 
 jobs:
-
   build:
-
     name: Build Reno7 SE MT6877 4.19.191
 
     runs-on: ubuntu-22.04
 
     timeout-minutes: 120
-
 
     outputs:
       device: ${{ steps.meta.outputs.device }}
@@ -178,49 +174,32 @@ jobs:
       kernel_release: ${{ steps.meta.outputs.kernel_release }}
       susfs_version: ${{ steps.meta.outputs.susfs_version }}
 
-
     env:
-
       WORKSPACE: ${{ github.workspace }}/kernel_workspace
 
       CONFIG_ENV: ${{ inputs.config }}
 
-
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
-
       CCACHE_NOHASHDIR: "true"
-
       CCACHE_HARDLINK: "true"
 
-
       IN_KSU_VARIANT: ${{ inputs.ksu_variant }}
-
       IN_KSU_REF: ${{ inputs.ksu_ref }}
-
       IN_KSU_HOOK_MODE: ${{ inputs.hook_mode }}
-
       IN_ENABLE_SUSFS: ${{ inputs.susfs }}
-
       IN_ENABLE_PATH_UMOUNT: ${{ inputs.path_umount }}
-
       IN_ENABLE_HIDE_STUFF: ${{ inputs.hide_stuff }}
-
       IN_ENABLE_KPM: ${{ inputs.kpm }}
-
       IN_EXTRA_DEFCONFIG: ${{ inputs.extra_defconfig }}
 
-
     steps:
-
 
       # ========================================================
       # KernelSU_Action
       # ========================================================
 
       - name: Checkout KernelSU Action
-
         uses: actions/checkout@v4
-
         with:
           fetch-depth: 1
 
@@ -230,13 +209,31 @@ jobs:
       # ========================================================
 
       - name: Resolve configuration
-
         shell: bash
-
         run: |
           set -euo pipefail
 
           bash scripts/config.sh
+
+          echo
+          echo "=============================================="
+          echo " Resolved build configuration"
+          echo "=============================================="
+
+          echo "DEVICE=${DEVICE}"
+          echo "ARCH=${ARCH}"
+          echo "KERNEL_SOURCE=${KERNEL_SOURCE}"
+          echo "KERNEL_SOURCE_BRANCH=${KERNEL_SOURCE_BRANCH}"
+          echo "KERNEL_CONFIG=${KERNEL_CONFIG}"
+          echo "KERNEL_IMAGE_NAME=${KERNEL_IMAGE_NAME}"
+          echo "KSU_VARIANT=${KSU_VARIANT}"
+          echo "KSU_REF=${KSU_REF}"
+          echo "KSU_HOOK_MODE=${KSU_HOOK_MODE}"
+          echo "ENABLE_SUSFS=${ENABLE_SUSFS}"
+          echo "ENABLE_PATH_UMOUNT=${ENABLE_PATH_UMOUNT}"
+          echo "USE_LLVM=${USE_LLVM}"
+          echo "ENABLE_GCC_ARM64=${ENABLE_GCC_ARM64}"
+          echo "ENABLE_GCC_ARM32=${ENABLE_GCC_ARM32}"
 
 
       # ========================================================
@@ -244,11 +241,8 @@ jobs:
       # ========================================================
 
       - name: Free disk space
-
         if: env.REMOVE_UNUSED_PACKAGES == 'true'
-
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
-
         with:
           tool-cache: true
           android: false
@@ -264,28 +258,19 @@ jobs:
       # ========================================================
 
       - name: Add swap space
-
         shell: bash
-
         run: |
           set -euo pipefail
 
-          sudo fallocate \
-            -l 8G \
-            /mnt/swapfile
-
-          sudo chmod \
-            600 \
-            /mnt/swapfile
-
-          sudo mkswap \
-            /mnt/swapfile
-
-          sudo swapon \
-            /mnt/swapfile
+          sudo fallocate -l 8G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
 
           echo
-          echo "Memory:"
+          echo "=============================================="
+          echo " Memory"
+          echo "=============================================="
 
           free -h
 
@@ -295,9 +280,7 @@ jobs:
       # ========================================================
 
       - name: Install build dependencies
-
         shell: bash
-
         run: |
           set -euo pipefail
 
@@ -313,6 +296,7 @@ jobs:
             cpio \
             curl \
             device-tree-compiler \
+            file \
             flex \
             git \
             libelf-dev \
@@ -336,9 +320,7 @@ jobs:
       # ========================================================
 
       - name: Set up toolchain
-
         shell: bash
-
         run: |
           set -euo pipefail
 
@@ -346,58 +328,53 @@ jobs:
 
 
       # ========================================================
-      # LLVM diagnostics
+      # LLVM verification
+      #
+      # No GCC32 is required.
+      #
+      # OPPO MT6877 vdso32 uses Clang:
+      #
+      #   clang --target=arm-linux-gnueabi
+      #
       # ========================================================
 
       - name: Verify MT6877 LLVM toolchain
-
         shell: bash
-
         run: |
           set -euo pipefail
 
+          export PATH="$CLANG_PATH:$PATH"
 
           echo "=============================================="
           echo " MT6877 LLVM Toolchain"
           echo "=============================================="
 
-
-          export PATH="$CLANG_PATH:$PATH"
-
-
           echo
           echo "Clang:"
-
           clang --version | head -n 2
-
 
           echo
           echo "LLD:"
-
           ld.lld --version | head -n 1
 
-
           echo
-          echo "LLVM AR:"
-
+          echo "llvm-ar:"
           llvm-ar --version | head -n 1
 
-
           echo
-          echo "LLVM NM:"
-
+          echo "llvm-nm:"
           llvm-nm --version | head -n 1
 
+          echo
+          echo "llvm-objcopy:"
+          llvm-objcopy --version | head -n 1
 
           echo
-          echo "AArch64 binutils prefix:"
-
-          command -v \
-            aarch64-linux-gnu-elfedit
-
+          echo "AArch64 GNU elfedit:"
+          command -v aarch64-linux-gnu-elfedit
 
           echo
-          echo "ARM32 clang target test:"
+          echo "ARM32 compat target test:"
 
           printf 'int x;\n' \
             | clang \
@@ -406,25 +383,20 @@ jobs:
                 -c - \
                 -o /tmp/arm32-test.o
 
-
           file /tmp/arm32-test.o
 
-
           rm -f /tmp/arm32-test.o
-
 
           echo
           echo "LLVM toolchain verified."
 
 
       # ========================================================
-      # OPPO kernel source
+      # Kernel source
       # ========================================================
 
       - name: Fetch OPPO MT6877 kernel source
-
         shell: bash
-
         run: |
           set -euo pipefail
 
@@ -432,94 +404,90 @@ jobs:
 
 
       # ========================================================
-      # Verify kernel
+      # Kernel verification
       # ========================================================
 
       - name: Verify Reno7 SE kernel source
-
         shell: bash
-
         run: |
           set -euo pipefail
 
-
           echo "=============================================="
-          echo " Kernel Source"
+          echo " OPPO Reno7 SE kernel source"
           echo "=============================================="
-
 
           echo
-          echo "Directory:"
+          echo "Kernel directory:"
           echo "  $KERNEL_DIR"
 
-
           echo
-          echo "Version:"
+          echo "Kernel version:"
 
           make \
             -s \
             -C "$KERNEL_DIR" \
             kernelversion
 
-
           echo
           echo "Defconfig:"
 
-          test -f \
-            "$KERNEL_DIR/arch/arm64/configs/k6877v1_64_k419_defconfig"
+          DEFCONFIG="$KERNEL_DIR/arch/arm64/configs/$KERNEL_CONFIG"
 
-          echo \
-            "$KERNEL_DIR/arch/arm64/configs/k6877v1_64_k419_defconfig"
+          test -f "$DEFCONFIG"
+
+          echo "  $DEFCONFIG"
+
+          echo
+          echo "Git revision:"
+
+          git \
+            -C "$KERNEL_DIR" \
+            rev-parse HEAD
 
 
       # ========================================================
-      # OPPO modules
+      # OPPO modules/vendor source
       # ========================================================
 
       - name: Checkout OPPO MT6877 kernel modules
-
         uses: actions/checkout@v4
-
         with:
           repository: oppo-source/android_kernel_modules_oppo_mt6877
-
           ref: oppo/mt6877_t_13.1.0_reno7_se_5g
-
           path: kernel_workspace/oppo-kernel-modules
-
           fetch-depth: 1
 
 
       # ========================================================
-      # Reconstruct OPPO source tree
+      # Reconstruct OPPO source layout
       #
-      # Layout #1:
+      # OPPO source contains at least two external path layouts.
+      #
+      # 1:
       #
       # kernel/sched_assist
-      # -> ../../vendor/...
+      # -> ../../vendor/oplus/...
       #
-      # therefore:
+      # resolves to:
       #
       # kernel_workspace/vendor
       #
       #
-      # Layout #2:
+      # 2:
       #
       # drivers/base/kernelFwUpdate
-      # -> ../../../../vnd/vendor/...
+      # -> ../../../../vnd/vendor/oplus/...
       #
-      # therefore:
+      # resolves to:
       #
-      # repo-root/vnd/vendor
+      # repository-root/vnd/vendor
+      #
       # ========================================================
 
       - name: Install OPPO MT6877 vendor mappings
-
         shell: bash
-
         run: |
           set -euo pipefail
-
 
           MODULES_DIR="$WORKSPACE/oppo-kernel-modules"
 
@@ -534,21 +502,9 @@ jobs:
           echo " OPPO MT6877 Vendor Integration"
           echo "=============================================="
 
-
-          echo
-          echo "GitHub workspace:"
-          echo "  $GITHUB_WORKSPACE"
-
-
-          echo
-          echo "Kernel workspace:"
-          echo "  $WORKSPACE"
-
-
           echo
           echo "Kernel:"
           echo "  $KERNEL_DIR"
-
 
           echo
           echo "Modules:"
@@ -556,7 +512,7 @@ jobs:
 
 
           # ----------------------------------------------------
-          # Verify modules repository
+          # Verify official modules repository
           # ----------------------------------------------------
 
           if [ ! -d "$MODULES_DIR/vendor" ]; then
@@ -572,32 +528,24 @@ jobs:
           echo
           echo "Vendor source size:"
 
-          du -sh \
-            "$MODULES_DIR/vendor"
+          du -sh "$MODULES_DIR/vendor"
 
 
           # ----------------------------------------------------
-          # Clean stale mappings
+          # Remove stale mappings
           # ----------------------------------------------------
 
-          rm -rf \
-            "$KERNEL_DIR/vendor"
+          rm -rf "$KERNEL_DIR/vendor"
 
+          rm -rf "$WORKSPACE_VENDOR"
 
-          rm -rf \
-            "$WORKSPACE_VENDOR"
+          mkdir -p "$VND_ROOT"
 
-
-          mkdir -p \
-            "$VND_ROOT"
-
-
-          rm -rf \
-            "$VND_VENDOR"
+          rm -rf "$VND_VENDOR"
 
 
           # ----------------------------------------------------
-          # Mapping #1
+          # Layout #1
           # ----------------------------------------------------
 
           ln -s \
@@ -606,72 +554,53 @@ jobs:
 
 
           # ----------------------------------------------------
-          # Mapping #2
+          # Layout #2
           # ----------------------------------------------------
 
           ln -s \
             "$MODULES_DIR/vendor" \
             "$VND_VENDOR"
 
-
-          # ----------------------------------------------------
-          # Show mappings
-          # ----------------------------------------------------
 
           echo
           echo "=============================================="
           echo " kernel_workspace/vendor"
           echo "=============================================="
 
-
-          ls -la \
-            "$WORKSPACE_VENDOR"
-
+          ls -la "$WORKSPACE_VENDOR"
 
           echo
           echo "Resolved:"
-
-          realpath \
-            "$WORKSPACE_VENDOR"
+          realpath "$WORKSPACE_VENDOR"
 
 
           echo
           echo "=============================================="
-          echo " vnd/vendor"
+          echo " repository-root/vnd/vendor"
           echo "=============================================="
 
-
-          ls -la \
-            "$VND_VENDOR"
-
+          ls -la "$VND_VENDOR"
 
           echo
           echo "Resolved:"
-
-          realpath \
-            "$VND_VENDOR"
+          realpath "$VND_VENDOR"
 
 
           # ----------------------------------------------------
-          # Critical OPPO source paths
+          # Required OPPO source components
           # ----------------------------------------------------
+
+          required_files=(
+            "kernel/sched_assist/Kconfig"
+            "kernel/locking/klockopt/Kconfig"
+            "drivers/base/kernelFwUpdate/Kconfig"
+          )
+
 
           echo
           echo "=============================================="
           echo " Required OPPO components"
           echo "=============================================="
-
-
-          required_files=(
-
-            "kernel/sched_assist/Kconfig"
-
-            "kernel/locking/klockopt/Kconfig"
-
-            "drivers/base/kernelFwUpdate/Kconfig"
-
-          )
-
 
           for file in "${required_files[@]}"; do
 
@@ -679,21 +608,17 @@ jobs:
             echo "Checking:"
             echo "  $file"
 
-
             if [ ! -f "$KERNEL_DIR/$file" ]; then
 
               echo "::error::Missing OPPO source:"
               echo "::error::$file"
 
-
               echo
               echo "Parent directory:"
-
 
               ls -la \
                 "$KERNEL_DIR/$(dirname "$file")" \
                 || true
-
 
               exit 1
 
@@ -701,9 +626,7 @@ jobs:
 
 
             echo "OK:"
-
-            realpath \
-              "$KERNEL_DIR/$file"
+            realpath "$KERNEL_DIR/$file"
 
           done
 
@@ -717,7 +640,6 @@ jobs:
           echo " Broken symlinks"
           echo "=============================================="
 
-
           find "$KERNEL_DIR" \
             -xtype l \
             -print \
@@ -725,14 +647,10 @@ jobs:
             | tee "$WORKSPACE/broken-symlinks.txt" \
             || true
 
-
           echo
           echo "Broken symlink count:"
 
-          wc -l \
-            "$WORKSPACE/broken-symlinks.txt" \
-            || true
-
+          wc -l "$WORKSPACE/broken-symlinks.txt" || true
 
           echo
           echo "=============================================="
@@ -741,15 +659,163 @@ jobs:
 
 
       # ========================================================
+      # OPPO / MediaTek Werror compatibility
+      #
+      # IMPORTANT:
+      #
+      # The MTK source contains many Makefiles with:
+      #
+      #   ccflags-y += -Werror
+      #   subdir-ccflags-y += -Werror
+      #
+      # These bypass CONFIG_CC_WERROR=n.
+      #
+      # Newer Clang therefore makes harmless warnings fatal.
+      #
+      # We replace ONLY standalone:
+      #
+      #   -Werror
+      #
+      # with:
+      #
+      #   -Wno-error
+      #
+      # Specific diagnostics such as:
+      #
+      #   -Werror=implicit-function-declaration
+      #
+      # remain untouched.
+      # ========================================================
+
+      - name: Disable OPPO and MediaTek vendor Werror
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=============================================="
+          echo " OPPO / MTK Vendor Werror Compatibility"
+          echo "=============================================="
+
+          python3 - "$KERNEL_DIR" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          root = Path(sys.argv[1])
+
+          if not root.is_dir():
+              raise SystemExit(
+                  f"Kernel directory does not exist: {root}"
+              )
+
+          #
+          # Match only a standalone -Werror token.
+          #
+          # Preserve:
+          #
+          # -Werror=implicit-function-declaration
+          # -Werror=strict-prototypes
+          # etc.
+          #
+
+          pattern = re.compile(
+              r'(?<!\S)-Werror(?=\s|$)'
+          )
+
+          changed_files = []
+          changed_flags = 0
+
+
+          for path in root.rglob("*"):
+
+              if not path.is_file():
+                  continue
+
+              if path.name not in (
+                  "Makefile",
+                  "Kbuild",
+              ):
+                  continue
+
+              try:
+                  text = path.read_text()
+
+              except UnicodeDecodeError:
+                  continue
+
+
+              updated, count = pattern.subn(
+                  "-Wno-error",
+                  text
+              )
+
+
+              if not count:
+                  continue
+
+
+              path.write_text(updated)
+
+              changed_files.append(
+                  (
+                      path.relative_to(root),
+                      count,
+                  )
+              )
+
+              changed_flags += count
+
+
+          print()
+          print(
+              f"Changed {changed_flags} standalone "
+              f"-Werror flags in {len(changed_files)} files."
+          )
+          print()
+
+
+          for path, count in changed_files:
+
+              print(
+                  f"[{count:2}] {path}"
+              )
+
+
+          print()
+          print(
+              "Specific -Werror=<warning> flags were preserved."
+          )
+          PY
+
+
+          echo
+          echo "=============================================="
+          echo " Remaining standalone -Werror"
+          echo "=============================================="
+
+          grep \
+            -R \
+            --include='Makefile' \
+            --include='Kbuild' \
+            -nE \
+            '(^|[[:space:]])-Werror([[:space:]]|$)' \
+            "$KERNEL_DIR" \
+            || true
+
+
+          echo
+          echo "=============================================="
+          echo " Vendor Werror compatibility ready"
+          echo "=============================================="
+
+
+      # ========================================================
       # ReSukiSU
       # ========================================================
 
       - name: Install ReSukiSU
-
         if: env.KSU_VARIANT != 'none'
-
         shell: bash
-
         run: |
           set -euo pipefail
 
@@ -757,44 +823,86 @@ jobs:
 
 
       # ========================================================
-      # OPPO-specific ReSukiSU hooks
+      # ReSukiSU information
       # ========================================================
 
-      - name: Apply Reno7 SE ReSukiSU 4.19 hooks
-
+      - name: Show ReSukiSU information
         if: env.KSU_VARIANT == 'resukisu'
-
         shell: bash
-
         run: |
           set -euo pipefail
 
-          chmod +x \
-            scripts/apply_oppo_mt6877_resukisu_hooks.sh
+          echo "=============================================="
+          echo " ReSukiSU"
+          echo "=============================================="
 
-          bash \
-            scripts/apply_oppo_mt6877_resukisu_hooks.sh
+          echo "KSU_NAME=${KSU_NAME:-}"
+          echo "KSU_REF_RESOLVED=${KSU_REF_RESOLVED:-}"
+          echo "KSU_VERSION_LABEL=${KSU_VERSION_LABEL:-}"
+          echo "KSU_COMMIT_COUNT=${KSU_COMMIT_COUNT:-}"
+          echo "KSU_HOOK_MODE_RESOLVED=${KSU_HOOK_MODE_RESOLVED:-}"
+
+          echo
+          echo "KernelSU source:"
+
+          test -d "$KERNEL_DIR/KernelSU"
+
+          git \
+            -C "$KERNEL_DIR/KernelSU" \
+            log \
+            -1 \
+            --oneline
 
 
       # ========================================================
-      # Remaining patches
+      # OPPO MT6877 ReSukiSU manual hooks
       #
-      # The MT6877 hook script already applies manual hooks.
+      # This script:
       #
-      # Temporarily override KSU_HOOK_MODE_RESOLVED only for
-      # patches.sh so it does NOT attempt the generic ReSukiSU
-      # hook patch again.
+      # - uses official ReSukiSU kernel-4.19 hooks
+      # - applies exec/open/stat hooks
+      # - handles MT6877 reboot.c separately
       #
-      # KSU_HOOK_MODE itself remains manual and build.sh will
-      # therefore still enable CONFIG_KSU_MANUAL_HOOK.
+      # ========================================================
+
+      - name: Apply Reno7 SE ReSukiSU 4.19 hooks
+        if: env.KSU_VARIANT == 'resukisu'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SCRIPT="$GITHUB_WORKSPACE/scripts/apply_oppo_mt6877_resukisu_hooks.sh"
+
+          if [ ! -f "$SCRIPT" ]; then
+
+            echo "::error::Missing:"
+            echo "::error::$SCRIPT"
+
+            exit 1
+
+          fi
+
+          chmod +x "$SCRIPT"
+
+          bash "$SCRIPT"
+
+
+      # ========================================================
+      # Remaining kernel patches
       #
-      # path_umount remains enabled.
+      # Manual hooks are already installed by our MT6877 script.
+      #
+      # Override only KSU_HOOK_MODE_RESOLVED for patches.sh so
+      # it does not attempt generic ReSukiSU hooks again.
+      #
+      # KSU_HOOK_MODE itself remains manual, therefore build.sh
+      # still enables CONFIG_KSU_MANUAL_HOOK.
+      #
+      # path_umount continues to be applied.
       # ========================================================
 
       - name: Apply remaining kernel patches
-
         shell: bash
-
         run: |
           set -euo pipefail
 
@@ -803,62 +911,44 @@ jobs:
 
 
       # ========================================================
-      # Final ReSukiSU source verification
+      # Verify source integration
       # ========================================================
 
       - name: Verify ReSukiSU integration
-
         if: env.KSU_VARIANT == 'resukisu'
-
         shell: bash
-
         run: |
           set -euo pipefail
-
 
           echo "=============================================="
           echo " ReSukiSU Integration Verification"
           echo "=============================================="
 
-
-          if [ ! -d "$KERNEL_DIR/KernelSU" ]; then
-
-            echo "::error::KernelSU source directory missing."
-
-            exit 1
-
-          fi
-
+          test -d "$KERNEL_DIR/KernelSU"
 
           grep -q \
             "ksu_handle_execveat" \
             "$KERNEL_DIR/fs/exec.c"
 
-
           grep -q \
             "ksu_handle_faccessat" \
             "$KERNEL_DIR/fs/open.c"
-
 
           grep -q \
             "ksu_handle_stat" \
             "$KERNEL_DIR/fs/stat.c"
 
-
           grep -q \
             "ksu_handle_newfstat_ret" \
             "$KERNEL_DIR/fs/stat.c"
-
 
           grep -q \
             "ksu_handle_fstat64_ret" \
             "$KERNEL_DIR/fs/stat.c"
 
-
           grep -q \
             "ksu_handle_sys_reboot" \
             "$KERNEL_DIR/kernel/reboot.c"
-
 
           grep -q \
             "^int path_umount" \
@@ -866,15 +956,14 @@ jobs:
 
 
           echo
-          echo "ReSukiSU source:       OK"
-          echo "execve hook:           OK"
-          echo "faccessat hook:        OK"
-          echo "stat hook:             OK"
-          echo "newfstat return hook:  OK"
-          echo "fstat64 return hook:   OK"
-          echo "reboot hook:           OK"
-          echo "path_umount:           OK"
-
+          echo "ReSukiSU source:      OK"
+          echo "execve hook:          OK"
+          echo "faccessat hook:       OK"
+          echo "stat hook:            OK"
+          echo "newfstat hook:        OK"
+          echo "fstat64 hook:         OK"
+          echo "reboot hook:          OK"
+          echo "path_umount:          OK"
 
           echo
           echo "=============================================="
@@ -883,63 +972,73 @@ jobs:
 
 
       # ========================================================
+      # Source diff diagnostics
+      # ========================================================
+
+      - name: Show kernel source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=============================================="
+          echo " Kernel source changes"
+          echo "=============================================="
+
+          cd "$KERNEL_DIR"
+
+          git diff --stat || true
+
+          echo
+          echo "git diff --check:"
+
+          git diff --check
+
+
+      # ========================================================
       # ccache
       # ========================================================
 
       - name: Set up ccache
-
         if: env.ENABLE_CCACHE == 'true'
-
         uses: hendrikmuhs/ccache-action@v1.2
-
         with:
           key: >-
-            reno7se-mt6877-${{
+            Reno7SE-MT6877-4.19-${{
             env.KSU_VARIANT }}-${{
-            env.KERNEL_VERSION }}
+            env.CLANG_VERSION }}
 
           max-size: 2G
 
 
       # ========================================================
-      # Build
+      # Kernel build
       # ========================================================
 
       - name: Build kernel
-
         shell: bash
-
         run: |
           set -euo pipefail
 
-
           LOG="$WORKSPACE/build.log"
 
-
           echo "=============================================="
-          echo " Building"
           echo " OPPO Reno7 SE 5G"
           echo " MT6877"
           echo " Linux 4.19.191"
           echo " ReSukiSU"
           echo "=============================================="
 
-
           echo
           echo "Build log:"
           echo "  $LOG"
 
-
           set +e
-
 
           bash scripts/build.sh all \
             2>&1 \
             | tee "$LOG"
 
-
           STATUS=${PIPESTATUS[0]}
-
 
           set -e
 
@@ -949,18 +1048,41 @@ jobs:
             echo
             echo "::error::Kernel build failed with status $STATUS"
 
+            echo
+            echo "=============================================="
+            echo " First compiler/linker errors"
+            echo "=============================================="
+
+            grep \
+              -nEi \
+              '(^|[[:space:]])(error:|fatal error:|undefined reference|No such file or directory|relocation.*failed|ld\.lld: error:)' \
+              "$LOG" \
+              | head -n 100 \
+              || true
+
+
+            echo
+            echo "=============================================="
+            echo " Relevant make failures"
+            echo "=============================================="
+
+            grep \
+              -nE \
+              'make(\[[0-9]+\])?: \*\*\*' \
+              "$LOG" \
+              | head -n 100 \
+              || true
+
 
             echo
             echo "=============================================="
             echo " Last 300 build log lines"
             echo "=============================================="
 
-
             tail \
               -n 300 \
               "$LOG" \
               || true
-
 
             exit "$STATUS"
 
@@ -972,23 +1094,17 @@ jobs:
       # ========================================================
 
       - name: Verify final kernel config
-
         shell: bash
-
         run: |
           set -euo pipefail
 
-
           CONFIG="$KERNEL_DIR/out/.config"
-
-
-          echo "=============================================="
-          echo " Final Kernel Configuration"
-          echo "=============================================="
-
 
           test -f "$CONFIG"
 
+          echo "=============================================="
+          echo " Final kernel configuration"
+          echo "=============================================="
 
           echo
           echo "KernelSU:"
@@ -1012,7 +1128,8 @@ jobs:
           echo "Module signature:"
 
           grep \
-            -E '^CONFIG_MODULE_SIG|^# CONFIG_MODULE_SIG_FORCE' \
+            -E \
+            '^CONFIG_MODULE_SIG|^# CONFIG_MODULE_SIG_FORCE' \
             "$CONFIG" \
             || true
 
@@ -1036,23 +1153,20 @@ jobs:
 
 
           # ----------------------------------------------------
-          # Mandatory ReSukiSU configuration
+          # Mandatory ReSukiSU config
           # ----------------------------------------------------
 
           grep -q \
             '^CONFIG_KSU=y' \
             "$CONFIG"
 
-
           grep -q \
             '^CONFIG_KSU_MANUAL_HOOK=y' \
             "$CONFIG"
 
-
           grep -q \
             '^CONFIG_KALLSYMS=y' \
             "$CONFIG"
-
 
           grep -q \
             '^CONFIG_KALLSYMS_ALL=y' \
@@ -1060,7 +1174,7 @@ jobs:
 
 
           # ----------------------------------------------------
-          # Module signature enforcement must NOT remain forced.
+          # Module signature enforcement
           # ----------------------------------------------------
 
           if grep -q \
@@ -1080,13 +1194,51 @@ jobs:
 
 
       # ========================================================
-      # Package
+      # Built image verification
+      # ========================================================
+
+      - name: Verify kernel image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE="$KERNEL_DIR/out/arch/arm64/boot/Image.gz"
+
+          echo "=============================================="
+          echo " Kernel Image"
+          echo "=============================================="
+
+          test -s "$IMAGE"
+
+          echo
+          echo "File:"
+          file "$IMAGE"
+
+          echo
+          echo "Size:"
+          ls -lh "$IMAGE"
+
+          echo
+          echo "SHA256:"
+          sha256sum "$IMAGE"
+
+          echo
+          echo "Kernel release:"
+
+          if [ -f "$KERNEL_DIR/out/include/generated/utsrelease.h" ]; then
+
+            cat \
+              "$KERNEL_DIR/out/include/generated/utsrelease.h"
+
+          fi
+
+
+      # ========================================================
+      # Package artifacts
       # ========================================================
 
       - name: Package artifacts
-
         shell: bash
-
         run: |
           set -euo pipefail
 
@@ -1098,39 +1250,26 @@ jobs:
       # ========================================================
 
       - name: Export build metadata
-
         id: meta
-
         shell: bash
-
         run: |
           {
-
             echo "device=${DEVICE}"
-
             echo "build_time=${BUILD_TIME}"
-
             echo "ksu_name=${KSU_NAME:-none}"
-
             echo "ksu_version=${KSU_VERSION_LABEL:-}"
-
             echo "kernel_release=${KERNEL_RELEASE:-}"
-
             echo "susfs_version=${SUSFS_VERSION:-disabled}"
-
           } >> "$GITHUB_OUTPUT"
 
 
       # ========================================================
-      # Image.gz
+      # Upload Image.gz
       # ========================================================
 
       - name: Upload kernel image
-
         uses: actions/upload-artifact@v4
-
         with:
-
           name: >-
             Image.gz-ReSukiSU-Reno7SE-MT6877-${{
             env.BUILD_TIME }}
@@ -1140,21 +1279,21 @@ jobs:
 
           if-no-files-found: error
 
+          compression-level: 0
+
 
       # ========================================================
-      # AnyKernel3
+      # Upload AnyKernel3
       #
-      # Additional artifact only.
+      # Keep only as an additional artifact.
       #
-      # Prefer stock boot.img repacking for the first real test.
+      # First real-device test should use the exact stock
+      # boot.img instead.
       # ========================================================
 
       - name: Upload AnyKernel3
-
         uses: actions/upload-artifact@v4
-
         with:
-
           name: >-
             AnyKernel3-ReSukiSU-Reno7SE-MT6877-${{
             env.BUILD_TIME }}
@@ -1169,13 +1308,9 @@ jobs:
       # ========================================================
 
       - name: Upload DTBO image
-
         if: env.CHECK_DTBO_IS_OK == 'true'
-
         uses: actions/upload-artifact@v4
-
         with:
-
           name: >-
             dtbo-Reno7SE-MT6877-${{
             env.BUILD_TIME }}
@@ -1191,13 +1326,9 @@ jobs:
       # ========================================================
 
       - name: Upload boot image
-
         if: env.MAKE_BOOT_IMAGE_IS_OK == 'true'
-
         uses: actions/upload-artifact@v4
-
         with:
-
           name: >-
             boot-ReSukiSU-Reno7SE-MT6877-${{
             env.BUILD_TIME }}
@@ -1212,13 +1343,9 @@ jobs:
       # ========================================================
 
       - name: Upload build diagnostics
-
         if: failure()
-
         uses: actions/upload-artifact@v4
-
         with:
-
           name: >-
             Reno7SE-MT6877-error-${{
             github.run_number }}
@@ -1228,8 +1355,10 @@ jobs:
           path: |
             kernel_workspace/build.log
             kernel_workspace/broken-symlinks.txt
+            kernel_workspace/defconfig.orig
             kernel_workspace/android-kernel/out/.config
             kernel_workspace/android-kernel/out/include/generated/autoconf.h
+            kernel_workspace/android-kernel/out/include/generated/utsrelease.h
             kernel_workspace/android-kernel/arch/arm64/configs/k6877v1_64_k419_defconfig
 
 
@@ -1238,7 +1367,6 @@ jobs:
   # ============================================================
 
   release:
-
     name: Publish Reno7 SE kernel release
 
     needs:
@@ -1248,33 +1376,24 @@ jobs:
 
     runs-on: ubuntu-22.04
 
-
     permissions:
       contents: write
 
-
     steps:
 
-
       - name: Download artifacts
-
         uses: actions/download-artifact@v4
-
         with:
           path: artifacts
           merge-multiple: false
 
 
       - name: Prepare release files
-
         shell: bash
-
         run: |
           set -euo pipefail
 
-
           mkdir -p release
-
 
           shopt -s nullglob
 
@@ -1287,10 +1406,8 @@ jobs:
 
             name=$(basename "${dir%/}")
 
-
             echo "Packing:"
             echo "  $name"
-
 
             (
               cd "$dir"
@@ -1333,16 +1450,12 @@ jobs:
           echo " Release files"
           echo "=============================================="
 
-
           ls -lah release/
 
 
       - name: Create GitHub Release
-
         uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8
-
         with:
-
           tag_name: >-
             Reno7SE-MT6877-${{
             needs.build.outputs.build_time }}
@@ -1383,22 +1496,23 @@ jobs:
 
             - ReSukiSU
             - Manual syscall hooks
-            - OPPO MT6877-specific 4.19 integration
+            - OPPO MT6877-specific Linux 4.19 integration
             - path_umount backport
 
-            ### Current safety/compatibility settings
+            ### Compatibility
 
             - SUSFS disabled
             - KPM disabled
-            - LTO/CFI stock configuration preserved
-            - kernel LOCALVERSION preserved
-            - MODULE_SIG support retained
-            - MODULE_SIG_FORCE disabled
+            - stock LOCALVERSION preserved
+            - module signature support retained
+            - CONFIG_MODULE_SIG_FORCE disabled
+            - OPPO/MediaTek standalone -Werror downgraded to -Wno-error
+            - specific -Werror=<diagnostic> checks preserved
 
             ### Flashing
 
-            For the first test, repacking the exact stock boot.img
-            is preferred over directly flashing the generic AnyKernel3 ZIP.
+            For the first real-device test, use the exact stock boot.img
+            and replace only its kernel.
 
             Keep the original stock boot.img before testing.
 
