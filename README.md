@@ -2,6 +2,10 @@
 
 # KernelSU Action
 
+OPPO Reno7 SE F.06 的纯净内核排查入口：**Reno7 SE F.06 Stock Baseline** workflow。
+使用实机配置与 Clang r383902，不集成 KSU。参见 [构建说明](BUILD.md)、
+[刷写与回滚](FLASH-TEST.md)、[启动日志](DEBUG-BOOTLOOP.md)。
+
 用 GitHub Actions 为 Android 内核集成 KernelSU（及其各种分支）、SUSFS 与常用补丁，并产出可刷入的 AnyKernel3 包。
 
 需要一定的内核与 Android 基础知识。
