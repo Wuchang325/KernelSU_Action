@@ -25,16 +25,22 @@ def prepare(kernel: Path, modules: Path, report: Path) -> None:
         raise ValueError("Expected seven original MT6877 charger includes")
     # Use srctree include lookup instead of the unavailable full Android layout.
     header.write_text(text.replace(prefix, ""))
-    makefile = vendor / "oplus/kernel/charger/Makefile"
-    with makefile.open("a") as stream:
-        stream.write("\n# Public-source layout: resolve kernel-relative charger headers.\n")
-        stream.write("subdir-ccflags-y += -I$(srctree)\n")
+    # drivers/power/Makefile can enter oplus/v1 directly, skipping charger/Makefile.
+    # Set both the parent and the real v1 entry point, including v1 root objects.
+    for relative in ("Makefile", "v1/Makefile"):
+        makefile = vendor / "oplus/kernel/charger" / relative
+        with makefile.open("a") as stream:
+            stream.write("\n# Public-source layout: resolve kernel-relative charger headers.\n")
+            stream.write("subdir-ccflags-y += -I$(srctree)\n")
+            if relative == "v1/Makefile":
+                stream.write("ccflags-y += -I$(srctree)\n")
 
     required = (
         "kernel/sched_assist/Kconfig",
         "kernel/locking/klockopt/Kconfig",
         "drivers/base/kernelFwUpdate/Kconfig",
         "drivers/misc/mediatek/scp/include/scp.h",
+        "drivers/misc/mediatek/typec/tcpc/inc/tcpm.h",
     )
     for name in required:
         if not (kernel / name).is_file():

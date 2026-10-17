@@ -576,8 +576,6 @@ jobs:
       - name: Apply OPPO vendor compatibility fixes
         shell: bash
         run: |
-          # Match literal Kbuild $(srctree) expressions without shell expansion.
-          # shellcheck disable=SC2016
           set -euo pipefail
 
           MODULES_DIR="$WORKSPACE/oppo-kernel-modules"
@@ -903,35 +901,35 @@ jobs:
           test -f "$CHARGEPUMP_MAKEFILE"
 
           grep -Fq \
-            'subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc' \
+            "subdir-ccflags-y += -I\$(srctree)/drivers/misc/mediatek/typec/tcpc/inc" \
             "$CHARGER_TOP_MAKEFILE"
 
           grep -Fq \
-            'subdir-ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger' \
+            "subdir-ccflags-y += -I\$(srctree)/drivers/power/supply/mediatek/charger" \
             "$CHARGER_TOP_MAKEFILE"
 
           grep -Fq \
-            'ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc' \
+            "ccflags-y += -I\$(srctree)/drivers/misc/mediatek/typec/tcpc/inc" \
             "$CHARGER_V1_MAKEFILE"
 
           grep -Fq \
-            'ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger' \
+            "ccflags-y += -I\$(srctree)/drivers/power/supply/mediatek/charger" \
             "$CHARGER_V1_MAKEFILE"
 
           grep -Fq \
-            'subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc' \
+            "subdir-ccflags-y += -I\$(srctree)/drivers/misc/mediatek/typec/tcpc/inc" \
             "$CHARGER_V1_MAKEFILE"
 
           grep -Fq \
-            'subdir-ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger' \
+            "subdir-ccflags-y += -I\$(srctree)/drivers/power/supply/mediatek/charger" \
             "$CHARGER_V1_MAKEFILE"
 
           grep -Fq \
-            'ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc' \
+            "ccflags-y += -I\$(srctree)/drivers/misc/mediatek/typec/tcpc/inc" \
             "$CHARGEPUMP_MAKEFILE"
 
           grep -Fq \
-            'ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger' \
+            "ccflags-y += -I\$(srctree)/drivers/power/supply/mediatek/charger" \
             "$CHARGEPUMP_MAKEFILE"
 
           echo "charger root inheritance: OK"
