@@ -122,7 +122,7 @@ MAKE_ARGS=( -C "$KERNEL_DIR" -I "$KERNEL_DIR" O=out ARCH=arm64 CC=clang LD=ld.ll
     AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump
     READELF=llvm-readelf STRIP=llvm-strip
     CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi-
-    CROSS_COMPILE_COMPAT=arm-linux-androideabi- CLANG_TRIPLE=aarch64-linux-gnu-
+    CROSS_COMPILE_COMPAT= CLANG_TRIPLE=aarch64-linux-gnu-
     "TARGET_PRODUCT=$TARGET_PRODUCT" LLVM_IAS=1 )
 mkdir -p "$KERNEL_DIR/out"
 cp "$ARTIFACTS/config.original" "$KERNEL_DIR/out/.config"

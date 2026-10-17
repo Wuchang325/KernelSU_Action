@@ -50,6 +50,11 @@ MODVERSIONS、模块签名强制校验、KALLSYMS、KPROBES、OverlayFS、四项
 必须保留实机配置值，否则构建失败。其他 `olddefconfig` 差异也会保留供审查；
 大量差异意味着需要调查公开 Kconfig 与生产源码之间的差异。
 
+首次构建已观察到一个实际源码差异：公开 `arch/arm64/Kconfig.platforms` 的
+`MACH_MT6877` 强制选择 `DEVMPU_MT6877`，进一步选择 `MTK_DEVMPU`；
+实机配置里的 `MTK_DEVMPU` 却是关闭的。此差异保留在 `config.diff`，没有修改 Kconfig 去掩盖它。
+此外不设置 `CROSS_COMPILE_COMPAT` 前缀，避免公开 Kconfig 根据该环境变量额外开启原配置未启用的 COMPAT_VDSO。
+
 ## 产物
 
 下载 `Reno7SE-F06-stock-baseline-<run number>` artifact，包含：
