@@ -114,7 +114,9 @@ grep -q 'clang version 11.0.1' "$ARTIFACTS/compiler-version.txt"
 unset LOCALVERSION DISABLE_LTO
 export KBUILD_BUILD_USER=stock-baseline KBUILD_BUILD_HOST=github-actions
 export KBUILD_BUILD_TIMESTAMP='Tue Jan 31 21:06:31 CST 2023'
-MAKE_ARGS=( -C "$KERNEL_DIR" O=out ARCH=arm64 CC=clang LD=ld.lld
+# OPPO uses unqualified -include paths for OplusKernelEnvConfig.mk and
+# oplus_native_features.mk. Keep them visible in the O=out sub-make too.
+MAKE_ARGS=( -C "$KERNEL_DIR" -I "$KERNEL_DIR" O=out ARCH=arm64 CC=clang LD=ld.lld
     AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump
     READELF=llvm-readelf STRIP=llvm-strip
     CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi-

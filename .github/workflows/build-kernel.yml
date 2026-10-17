@@ -576,6 +576,8 @@ jobs:
       - name: Apply OPPO vendor compatibility fixes
         shell: bash
         run: |
+          # Match literal Kbuild $(srctree) expressions without shell expansion.
+          # shellcheck disable=SC2016
           set -euo pipefail
 
           MODULES_DIR="$WORKSPACE/oppo-kernel-modules"
