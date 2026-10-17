@@ -10,7 +10,8 @@
 
 - 官方 kernel：`cce8dd6161b12b9ce24176dbf5aa1a5a757cc91b`。
 - 官方 modules/vendor：`b4d84c6739c700f260da59d6df4efec8413264d2`。
-- Android 12 release 的 `clang-r383902`，Clang 11.0.1；配套 AOSP GCC 4.9 提供交叉工具。
+- Android 12 release 的 `clang-r383902`，Clang 11.0.1；配套 AOSP GCC 4.9 仓库提供交叉 binutils，
+  这些版本已不含 GCC 编译器，实际 C/汇编编译使用 Clang。
 - F.06 实机 config：`config/PFCM00-F06-stock-kernel.config`。
 - 原厂 boot：`boot/boot.img`，SHA256：
   `2dca84788aa3d5d60a839cf393319fac6da05cff19f34b17897af941378cb9e9`。

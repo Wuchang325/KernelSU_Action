@@ -104,11 +104,13 @@ export PATH="$TOOLS/clang/bin:$TOOLS/gcc64/bin:$TOOLS/gcc32/bin:$PATH"
 {
     clang --version
     ld.lld --version
-    aarch64-linux-android-gcc --version
-    arm-linux-androideabi-gcc --version
+    aarch64-linux-android-as --version
+    arm-linux-androideabi-as --version
 } > "$ARTIFACTS/compiler-version.txt"
 cat "$ARTIFACTS/compiler-version.txt"
 grep -q 'clang version 11.0.1' "$ARTIFACTS/compiler-version.txt"
+command -v aarch64-linux-android-elfedit
+command -v arm-linux-androideabi-ld
 
 # Avoid the generic KernelSU config, patch and build scripts entirely.
 unset LOCALVERSION DISABLE_LTO
