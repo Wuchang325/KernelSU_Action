@@ -23,17 +23,15 @@ def prepare(kernel: Path, modules: Path, report: Path) -> None:
     prefix = "../../../../kernel-4.19/"
     if text.count(prefix) != 7:
         raise ValueError("Expected seven original MT6877 charger includes")
-    # Use srctree include lookup instead of the unavailable full Android layout.
-    header.write_text(text.replace(prefix, ""))
-    # drivers/power/Makefile can enter oplus/v1 directly, skipping charger/Makefile.
-    # Set both the parent and the real v1 entry point, including v1 root objects.
-    for relative in ("Makefile", "v1/Makefile"):
-        makefile = vendor / "oplus/kernel/charger" / relative
-        with makefile.open("a") as stream:
-            stream.write("\n# Public-source layout: resolve kernel-relative charger headers.\n")
-            stream.write("subdir-ccflags-y += -I$(srctree)\n")
-            if relative == "v1/Makefile":
-                stream.write("ccflags-y += -I$(srctree)\n")
+    # Resolve the seven original references directly. The symlinked vendor tree
+    # does not reliably inherit include roots from charger parent Makefiles.
+    # Only include locations change; header contents and driver code stay intact.
+    for line in text.splitlines():
+        if prefix in line:
+            suffix = line.split(prefix, 1)[1].split('"', 1)[0]
+            if not (kernel / suffix).is_file():
+                raise ValueError(f"Missing original charger dependency: {suffix}")
+    header.write_text(text.replace(prefix, kernel.as_posix() + "/"))
 
     required = (
         "kernel/sched_assist/Kconfig",
@@ -47,8 +45,8 @@ def prepare(kernel: Path, modules: Path, report: Path) -> None:
             raise ValueError(f"Broken OPPO source mapping: {name}")
     report.write_text(
         "OPPO vendor links restored at kernel_workspace/vendor and vnd/vendor.\n"
-        "Seven charger include paths changed to kernel-relative paths.\n"
-        "Charger children inherit -I$(srctree).\n"
+        "Seven charger include paths resolved directly against the pinned kernel tree.\n"
+        "No charger Makefile or inherited include flags modified.\n"
         "No function bodies, Werror flags, root hooks or guard macros modified.\n"
         "Only DT image generation is disabled later; the stock DTB is reused.\n"
     )

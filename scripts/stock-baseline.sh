@@ -160,6 +160,14 @@ for key, value in final.items():
 print("Stock MODVERSIONS/signing/guards preserved; KSU absent")
 PY
 
+# Catch the known symlinked vendor-header failure before the full kernel build.
+make "${MAKE_ARGS[@]}" -j"$(nproc)" prepare modules_prepare
+if make "${MAKE_ARGS[@]}" -j"$(nproc)" drivers/power/oplus/; then
+    echo 'OPPO charger preflight passed.'
+else
+    make "${MAKE_ARGS[@]}" -j1 V=1 drivers/power/oplus/ || true
+    exit 1
+fi
 make "${MAKE_ARGS[@]}" -j"$(nproc)" Image.gz modules
 grep -q 'UTS_RELEASE "4.19.191+"' "$KERNEL_DIR/out/include/generated/utsrelease.h"
 for file in Image Image.gz; do

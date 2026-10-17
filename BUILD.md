@@ -40,9 +40,9 @@ bash scripts/stock-baseline.sh
 随后仅关闭公开源码缺少 `cust.dtsi` 的两项 DT 镜像构建开关，并再次执行 `olddefconfig`。
 kernel-only 重打包保留原厂 DTB 的整个厂商封装区域，不生成或刷写 dtbo。
 
-源码层面恢复 OPPO vendor 相对链接，修正七个 charger 的完整 Android 目录引用，
-在 charger 和直接参与 Kbuild 的 v1 入口设置内核头文件搜索路径，覆盖 v1 对象及子目录。
-这些改动完整保存在源码 diff 中。
+源码层面恢复 OPPO vendor 相对链接，将七个 charger 的完整 Android 目录引用直接解析到固定 kernel 源码树，
+不依赖软链接目录中的 include 继承，不更改 charger Makefile。这些改动完整保存在源码 diff 中。
+全量编译前先编译 charger 目录，失败时输出完整编译命令，尽早发现这类目录拼装问题。
 默认不批量关闭 `-Werror`，不修改 guard 代码或宏。make 的 include 搜索目录显式包含源码根目录，
 确保 `O=out` 子构建仍能读取 OPPO 自带的 feature makefiles；其中也明确记录了当前 TARGET_PRODUCT。
 
